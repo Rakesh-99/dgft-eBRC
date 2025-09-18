@@ -1,5 +1,5 @@
 import express from 'express';
-import { fileEbrc, getToken, testEbrcWithSampleData } from '../controllers/ebrc.controller.js';
+import { fileEbrc, getToken } from '../controllers/ebrc.controller.js';
 const ebrcRoutes = express.Router();
 
 
