@@ -10,7 +10,6 @@ import { fileEbrcService, getSandboxToken } from "../services/ebrc.service.js";
 // for fetching sandbox token : 
 export const getToken = async (req, res) => {
     try {
-
         const token = await getSandboxToken();
         return res.json({ success: true, token });
     } catch (error) {
@@ -31,13 +30,9 @@ export const fileEbrc = async (req, res) => {
                 message: "Request body is required"
             });
         }
-
         const response = await fileEbrcService(req.body);
         return res.json({ success: true, data: response });
     } catch (error) {
-        console.error(" FileEbrc Controller Error:", error.message);
-        console.error("Error stack:", error.stack);
-
         // Return more detailed error information
         return res.status(500).json({
             success: false,
