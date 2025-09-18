@@ -6,9 +6,9 @@ const ebrcRoutes = express.Router();
 
 
 ebrcRoutes
-    .get('/get-token', getToken)
+    .post('/get-token', getToken)
     .post('/file', fileEbrc)
-    .post('/test', testEbrcWithSampleData)
+  
 
 
 

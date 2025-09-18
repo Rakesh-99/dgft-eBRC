@@ -24,7 +24,7 @@ const getCurrentIP = async () => {
     }
 };
 
-//  fetching Sandbox Token : ---> 
+//  generating  Sandbox Token : ---> 
 export const getSandboxToken = async () => {
     try {
         const salt = crypto.randomBytes(32);
@@ -45,9 +45,8 @@ export const getSandboxToken = async () => {
                 timeout: 15000
             }
         );
-        return response.data.accessToken;
+        return response;
     } catch (error) {
-        console.error("Authentication failed:", error.response?.data || error.message);
         throw new Error("Authentication failed with DGFT Sandbox");
     }
 };
@@ -70,7 +69,7 @@ function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
 
         // Generate a 32-char printable secret (spec prefers keyboard chars)
-        const secretPlain = generatePrintableSecret32(); 
+        const secretPlain = generatePrintableSecret32();
 
         // 32-byte random salt per spec
         const salt = crypto.randomBytes(32);
@@ -149,7 +148,7 @@ function encryptAESKey(secretPlain) {
             {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha256'      
+                oaepHash: 'sha256'
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
@@ -200,8 +199,6 @@ export const fileEbrcService = async (payload) => {
             "accessToken": token,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
-            "x-api-key": apiKey,
-            "requestId": payload.requestId || `REQ_${Date.now()}`
         };
         // Make the request
         const response = await axios.post(endpoint, requestBody, {
