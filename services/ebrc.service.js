@@ -9,15 +9,15 @@ const apiKey = process.env.X_API_KEY;
 const clientId = process.env.CLIENT_ID;
 const userPrivateKey = process.env.USER_PRIVATE_KEY;
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY?.replace(/\\n/g, '\n');
-
+const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
 
 
 // 🔹 helper fn() to get current public IP of system : --> 
 const getCurrentIP = async () => {
     try {
-        const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
-        return response.data.ip;
+        const response = await axios.get('https://api.ipify.org?format=json');
+        return await response.data.ip;
     } catch (error) {
         console.log("Could not detect public IP:", error.message);
         return "Unknown";
@@ -32,7 +32,7 @@ export const getSandboxToken = async () => {
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
         const response = await axios.post(
-            `${baseUrl}/getAccessToken`,
+            `${accessTokenBaseUrl}/getAccessToken`,
             {
                 client_id: clientId,
                 client_secret: finalSecret,
@@ -47,7 +47,8 @@ export const getSandboxToken = async () => {
         );
         return response;
     } catch (error) {
-        throw new Error("Authentication failed with DGFT Sandbox");
+
+        throw new Error("Authentication failed with DGFT Sandbox", error);
     }
 };
 
