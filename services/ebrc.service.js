@@ -70,7 +70,7 @@ function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
 
         // Generate a 32-char printable secret (spec prefers keyboard chars)
-        const secretPlain = generatePrintableSecret32(); // <-- we'll encrypt this for secretVal
+        const secretPlain = generatePrintableSecret32(); 
 
         // 32-byte random salt per spec
         const salt = crypto.randomBytes(32);
@@ -95,9 +95,9 @@ function encryptPayload(payload) {
         const encodedData = combined.toString('base64');
 
         return {
-            secretPlain,        // important: encrypt this with DGFT public key (secretVal)
+            secretPlain,        //  encrypt this with DGFT public key (secretVal)
             encodedData,        // to go into request.data
-            payloadBase64       // for signing (sign this)
+            payloadBase64       // for signing 
         };
     } catch (encryptError) {
         console.error("Encryption error:", encryptError);
@@ -108,7 +108,7 @@ function encryptPayload(payload) {
 
 // helper fn() to create digital signature : --> 
 
-// --- createDigitalSignature: keep, but ensure we sign payloadBase64 (not encrypted blob) ---
+// --- createDigitalSignature: 
 function createDigitalSignature(dataToSign) {
     try {
         if (!userPrivateKey) {
@@ -149,7 +149,7 @@ function encryptAESKey(secretPlain) {
             {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha256'      // IMPORTANT: match spec OAEP-SHA256
+                oaepHash: 'sha256'      
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
