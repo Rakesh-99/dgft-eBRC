@@ -32,7 +32,7 @@ export const getSandboxToken = async () => {
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
         const response = await axios.post(
-            "https://apiservices.dgft.gov.in/genebrc/getAccessToken",
+            `${baseUrl}/getAccessToken`,
             {
                 client_id: clientId,
                 client_secret: finalSecret,
@@ -53,7 +53,7 @@ export const getSandboxToken = async () => {
 
 // --- helper: printable 32-char secret (keyboard characters) ---
 function generatePrintableSecret32() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
     const rnd = crypto.randomBytes(32);
     let s = '';
     for (let i = 0; i < 32; i++) s += chars[rnd[i] % chars.length];
@@ -160,6 +160,46 @@ function encryptAESKey(secretPlain) {
     }
 }
 
+// --- decryptResponse: decrypt and verify DGFT response using same secret and dgftPublicKey ---
+function decryptResponse(responseBody, secretPlain) {
+    try {
+        const combined = Buffer.from(responseBody.data, 'base64');
+        const iv = combined.slice(0, 12);
+        const salt = combined.slice(12, 44);
+        const authTag = combined.slice(combined.length - 16);
+        const ciphertext = combined.slice(44, combined.length - 16);
+
+        const saltedKey = crypto.createHash('sha256')
+            .update(Buffer.from(secretPlain, 'utf8'))
+            .update(salt)
+            .digest(); // 32 bytes
+
+        const decipher = crypto.createDecipheriv('aes-256-gcm', saltedKey, iv);
+        decipher.setAuthTag(authTag);
+        const decrypted = Buffer.concat([
+            decipher.update(ciphertext),
+            decipher.final()
+        ]);
+
+        const payloadBase64 = decrypted.toString('utf8');
+
+        // Verify signature
+        const verifier = crypto.createVerify('RSA-SHA256');
+        verifier.update(payloadBase64);
+        const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
+        if (!isVerified) {
+            throw new Error('Response signature verification failed');
+        }
+
+        // Decode base64 to JSON string and parse
+        const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
+        return JSON.parse(payloadJson);
+    } catch (decryptError) {
+        console.error("Decryption error:", decryptError);
+        throw new Error(`Response decryption failed: ${decryptError.message}`);
+    }
+}
+
 //   Step 2. fn() to fill/submit data on eBRC dgft in sandbox envirenment with IP detection : --> 
 export const fileEbrcService = async (payload) => {
     let currentIP = "Unknown";
@@ -168,7 +208,8 @@ export const fileEbrcService = async (payload) => {
         currentIP = await getCurrentIP();
         console.log(" Current public IP:", currentIP);
 
-        const token = await getSandboxToken();
+        const tokenResponse = await getSandboxToken();
+        const accessToken = tokenResponse.data.accessToken;
         console.log(" Token obtained successfully");
 
         //  sandbox endpoint
@@ -196,7 +237,7 @@ export const fileEbrcService = async (payload) => {
         //  headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
-            "accessToken": token,
+            "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
         };
@@ -206,8 +247,11 @@ export const fileEbrcService = async (payload) => {
             timeout: 30000
         });
 
+        // Decrypt and verify the response
+        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain);
+
         console.log("eBRC data filed successfully!");
-        return response.data;
+        return decryptedData;
 
     } catch (error) {
         console.error("DGFT Filing Error:", error.response?.status, error.response?.data || error.message);
