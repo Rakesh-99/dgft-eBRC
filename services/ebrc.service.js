@@ -11,9 +11,7 @@ const userPrivateKey = process.env.USER_PRIVATE_KEY;
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY?.replace(/\\n/g, '\n');
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
-
-
-// Valid currency codes from PDF (Annexure 6.4) - Complete list
+// Valid currency codes from PDF (Annexure 6.4) - EXACT list, removing duplicates
 const VALID_CURRENCY_CODES = [
     'USD', 'DEM', 'SGD', 'CHF', 'GBP', 'JPY', 'HKD', 'EUR', 'ITL', 'FRF',
     'AUD', 'SEK', 'CAD', 'BEF', 'DKK', 'FIM', 'NOK', 'ATS', 'INR', 'NLG',
@@ -29,10 +27,10 @@ const VALID_CURRENCY_CODES = [
     'PEN', 'PHP', 'PLN', 'ROL', 'RWF', 'SHP', 'XCD', 'SLL', 'SOS', 'LKR',
     'SDD', 'SRG', 'SZL', 'SYP', 'TWD', 'TZS', 'TOP', 'TTD', 'TND', 'TRL',
     'UGX', 'UAH', 'UYU', 'UZS', 'VEB', 'VND', 'WST', 'YER', 'ZMK', 'ZWD',
-    'RUR', 'TRY', 'KGS'
+    'TRY', 'KGS' // Removed RUR duplicate as PDF shows TRY separately
 ];
 
-// Error codes from PDF (Annexure 6.3)
+// Error codes from PDF (Annexure 6.3) - EXACT match
 const ERROR_CODES = {
     '401': 'Unauthorized. Client Id and client secret not matched.',
     '403': 'Access forbidden, please verify the IP, client Id and client secret',
@@ -77,9 +75,9 @@ const ERROR_CODES = {
     'ERR39': 'Invoice and purpose code mapping is not correct.'
 };
 
-
+// FIXED: Purpose codes EXACTLY as per PDF Annexures 6.1 & 6.2 - REMOVED P1001 (not in PDF)
 const VALID_PURPOSE_CODES = [
-    // Inward Remittance
+    // Inward Remittance (Annexure 6.1)
     'P0101', 'P0102', 'P0103', 'P0104', 'P0108', 'P0109',
     'P0201', 'P0202', 'P0205', 'P0207', 'P0208', 'P0211', 'P0214', 'P0215',
     'P0216', 'P0217', 'P0218', 'P0219', 'P0220', 'P0221', 'P0222', 'P0223',
@@ -92,7 +90,7 @@ const VALID_PURPOSE_CODES = [
     'P0801', 'P0802', 'P0803', 'P0804', 'P0805', 'P0806', 'P0807', 'P0808',
     'P0809',
     'P0901', 'P0902',
-    'P1001', // ADD THIS - it was missing
+    // REMOVED P1001 - NOT in PDF Annexure 6.1
     'P1002', 'P1003', 'P1004', 'P1005', 'P1006', 'P1007', 'P1008', 'P1009',
     'P1010', 'P1011', 'P1013', 'P1014', 'P1015', 'P1016', 'P1017', 'P1018',
     'P1019', 'P1020', 'P1021', 'P1022', 'P1099',
@@ -101,11 +99,9 @@ const VALID_PURPOSE_CODES = [
     'P1505',
     'P1601', 'P1602',
     'P1701',
-    // Outward Remittance
+    // Outward Remittance (Annexure 6.2)
     'S1501', 'S1502', 'S1504'
 ];
-
-
 
 export const checkCurrentIP = async () => {
     try {
@@ -119,17 +115,13 @@ export const checkCurrentIP = async () => {
     }
 };
 
-
-
-// Generating Sandbox Token: --->
+// FIXED: Token generation as per PDF specification
 export const getSandboxToken = async () => {
     try {
-
-
         const salt = crypto.randomBytes(32);
-        // CORRECT: Use PBKDF2 here too as per PDF
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
-        const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
+        // FIXED: Send only the derived key, not concatenated with salt
+        const finalSecret = derivedKey.toString("base64");
 
         console.log("=== TOKEN REQUEST DETAILS ===");
         console.log("Client ID:", clientId);
@@ -175,7 +167,6 @@ function generatePrintableSecret32() {
 function encryptPayload(payload) {
     try {
         const payloadJson = JSON.stringify(payload);
-        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
 
         // Generate a 32-char printable secret
         const secretPlain = generatePrintableSecret32();
@@ -186,12 +177,12 @@ function encryptPayload(payload) {
         // 12-byte IV for AES-GCM
         const iv = crypto.randomBytes(12);
 
-        // CORRECT: Use PBKDF2 as per PDF specification
+        // Use PBKDF2 as per PDF specification
         const saltedKey = crypto.pbkdf2Sync(secretPlain, salt, 65536, 32, "sha256");
 
         const cipher = crypto.createCipheriv('aes-256-gcm', saltedKey, iv);
         const encrypted = Buffer.concat([
-            cipher.update(payloadBase64, 'utf8'),
+            cipher.update(payloadJson, 'utf8'), // FIXED: Encrypt JSON directly, not base64
             cipher.final()
         ]);
         const authTag = cipher.getAuthTag();
@@ -203,7 +194,7 @@ function encryptPayload(payload) {
         return {
             secretPlain,
             encodedData,
-            payloadBase64
+            payloadJson // Return JSON for signing
         };
     } catch (encryptError) {
         console.error("Encryption error:", encryptError);
@@ -281,18 +272,16 @@ function decryptResponse(responseBody, secretPlain) {
             decipher.final()
         ]);
 
-        const payloadBase64 = decrypted.toString('utf8');
+        const payloadJson = decrypted.toString('utf8');
 
         // Verify signature
         const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(payloadBase64);
+        verifier.update(payloadJson);
         const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
         if (!isVerified) {
             throw new Error('Response signature verification failed');
         }
 
-        // Decode base64 to JSON string and parse
-        const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
         return JSON.parse(payloadJson);
     } catch (decryptError) {
         console.error("Decryption error:", decryptError);
@@ -300,19 +289,13 @@ function decryptResponse(responseBody, secretPlain) {
     }
 }
 
-// Validate payload : 
-
+// ENHANCED: Validate payload with stricter date validation and missing field checks
 function validatePayload(payload) {
     const errors = [];
 
-    // According to PDF, these are the EXACT required fields
+    // Required fields as per PDF
     const requiredFields = [
-        'messageId',      // String, max 50 chars
-        'purposeCode',    // From valid purpose codes
-        'irmNumber',      // String
-        'irmDate',        // ddMMYYYY format
-        'adCode',         // String
-        'amount'          // Number
+        'messageId', 'purposeCode', 'irmNumber', 'irmDate', 'adCode', 'amount'
     ];
 
     requiredFields.forEach(field => {
@@ -321,14 +304,18 @@ function validatePayload(payload) {
         }
     });
 
-    // Validate purpose code (ERR21)
-    if (payload.purposeCode && !VALID_PURPOSE_CODES.includes(payload.purposeCode)) {
-        errors.push('ERR21: Invalid purpose code');
+    // Validate purpose code (ERR21) - UPPERCASE only
+    if (payload.purposeCode) {
+        if (!VALID_PURPOSE_CODES.includes(payload.purposeCode.toUpperCase())) {
+            errors.push('ERR21: Invalid purpose code');
+        }
     }
 
-    // Validate currency code if provided
-    if (payload.currencyCode && !VALID_CURRENCY_CODES.includes(payload.currencyCode)) {
-        errors.push('Invalid currency code');
+    // Validate currency code - UPPERCASE only
+    if (payload.currencyCode) {
+        if (!VALID_CURRENCY_CODES.includes(payload.currencyCode.toUpperCase())) {
+            errors.push('Invalid currency code');
+        }
     }
 
     // Validate messageId length (ERR07)
@@ -336,12 +323,33 @@ function validatePayload(payload) {
         errors.push('ERR07: Invalid messageId, its length shall not be greater than 50');
     }
 
-    // Validate IFSC code (ERR14) - if provided
+    // Validate IFSC code (ERR14)
     if (payload.ifscCode && payload.ifscCode.length !== 11) {
         errors.push('ERR14: Invalid IFSC code, its length shall be 11 digit');
     }
 
-    // Validate date format (ERR17, ERR24, ERR28)
+    // ENHANCED: Strict date validation function
+    function isValidDate(dateStr) {
+        if (!/^\d{8}$/.test(dateStr)) return false;
+
+        const day = parseInt(dateStr.substring(0, 2));
+        const month = parseInt(dateStr.substring(2, 4));
+        const year = parseInt(dateStr.substring(4, 8));
+
+        if (month < 1 || month > 12) return false;
+        if (day < 1 || day > 31) return false;
+        if (year < 1900 || year > 2100) return false;
+
+        // Check days in month
+        const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) {
+            daysInMonth[1] = 29; // Leap year
+        }
+
+        return day <= daysInMonth[month - 1];
+    }
+
+    // Validate date fields with strict validation
     const dateFields = [
         { field: 'irmDate', errorCode: 'ERR17', required: true },
         { field: 'paymentDate', errorCode: 'ERR24', required: false },
@@ -352,7 +360,7 @@ function validatePayload(payload) {
 
     dateFields.forEach(({ field, errorCode, required }) => {
         if (payload[field]) {
-            if (!/^\d{8}$/.test(payload[field])) {
+            if (!isValidDate(payload[field])) {
                 errors.push(`${errorCode}: Invalid ${field} field. Date shall be in ddMMYYYY format`);
             }
         } else if (required) {
@@ -360,11 +368,21 @@ function validatePayload(payload) {
         }
     });
 
-    // Validate nested object dates if present
+    // Validate nested object dates
     if (payload.shipmentDetails?.invoiceDate) {
-        if (!/^\d{8}$/.test(payload.shipmentDetails.invoiceDate)) {
+        if (!isValidDate(payload.shipmentDetails.invoiceDate)) {
             errors.push('ERR28: Invalid invoiceDate in shipmentDetails. Date shall be in ddMMYYYY format');
         }
+    }
+
+    // ADDED: Softex number validation (ERR26)
+    if (payload.softexNumber && payload.softexNumber.toString().length > 7) {
+        errors.push('ERR26: Invalid Softex number in the application');
+    }
+
+    // ADDED: Invoice number validation (ERR27)
+    if (payload.invoiceNumber && payload.invoiceNumber.toString().length > 20) {
+        errors.push('ERR27: Invalid invoice number mentioned');
     }
 
     // Validate shipping bill number (ERR25)
@@ -383,23 +401,30 @@ function validatePayload(payload) {
     }
 
     // Validate Vostro flag (ERR32)
-    if (payload.isVostro && !['Y', 'N'].includes(payload.isVostro)) {
+    if (payload.isVostro && !['Y', 'N'].includes(payload.isVostro.toUpperCase())) {
         errors.push('ERR32: Invalid values for isVostro flag. Allowed values are Y/N');
     }
 
     // Validate Vostro type (ERR33)
-    if (payload.vostroType && !['SVRA', 'NVRA'].includes(payload.vostroType)) {
+    if (payload.vostroType && !['SVRA', 'NVRA'].includes(payload.vostroType.toUpperCase())) {
         errors.push('ERR33: Invalid vostro type specified. Allowed values are SVRA/NVRA');
     }
 
     // Validate 3rd party export flag (ERR34)
-    if (payload.thirdPartyExport && !['Y', 'N'].includes(payload.thirdPartyExport)) {
+    if (payload.thirdPartyExport && !['Y', 'N'].includes(payload.thirdPartyExport.toUpperCase())) {
         errors.push('ERR34: Invalid 3rd party export flag. Allowed values are Y/N');
+    }
+
+    // ADDED: Declaration flag validation (ERR36, ERR37)
+    if (payload.declarationFlag === undefined || payload.declarationFlag === null || payload.declarationFlag === '') {
+        errors.push('ERR36: Declaration flag is missing');
+    } else if (!['Y', 'N'].includes(payload.declarationFlag.toUpperCase())) {
+        errors.push('ERR37: Invalid values specified for declaration flag');
     }
 
     // Validate amount (ERR35)
     if (payload.amount && (isNaN(payload.amount) || payload.amount <= 0)) {
-        errors.push('ERR35: Invalid amount specified');
+        errors.push('ERR35: Invalid ORM amount specified');
     }
 
     if (errors.length > 0) {
@@ -416,7 +441,6 @@ export const fileEbrcService = async (payload) => {
 
         let systemIP = await checkCurrentIP();
         console.log(" System Public IP:", systemIP.ip);
-
 
         // Comprehensive payload validation against PDF specs
         console.log("Validating payload...");
@@ -445,11 +469,11 @@ export const fileEbrcService = async (payload) => {
         // Encrypt payload using AES-256-GCM
         console.log("Encrypting payload...");
         const encryptionResult = encryptPayload(payload);
-        console.log("Payload encrypted successfully ----> ", encryptionResult.encodedData);
+        console.log("Payload encrypted successfully");
 
-        // CRITICAL FIX: Sign the base64 payload, not the encrypted data
+        // FIXED: Sign the JSON payload directly as per PDF spec
         console.log("Creating digital signature...");
-        const signature = createDigitalSignature(encryptionResult.payloadBase64);
+        const signature = createDigitalSignature(encryptionResult.payloadJson);
         console.log("Signature created successfully");
 
         // Encrypt AES key with DGFT's public key
@@ -470,8 +494,8 @@ export const fileEbrcService = async (payload) => {
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
             "Accept": "application/json",
-            "Cache-Control": "no-cache",
-            "User-Agent": "eBRC-Integration/1.0"
+            "Cache-Control": "no-cache"
+            // REMOVED: Custom User-Agent not specified in PDF
         };
 
         console.log("=== SENDING REQUEST TO DGFT ===");
@@ -485,6 +509,7 @@ export const fileEbrcService = async (payload) => {
         });
         console.log("Request body data length:", requestBody.data.length);
         console.log("Request body sign length:", requestBody.sign.length);
+
         const response = await axios.post(endpoint, requestBody, {
             headers: headers,
             timeout: 30000
@@ -541,3 +566,32 @@ export const fileEbrcService = async (payload) => {
     }
 };
 
+// Export validation function for external use
+export const validateEbrcPayload = validatePayload;
+
+// Add connectivity test function
+export const testDGFTConnectivity = async () => {
+    try {
+        console.log("=== TESTING DGFT CONNECTIVITY ===");
+        const ipInfo = await checkCurrentIP();
+        console.log("Current IP:", ipInfo.ip);
+        console.log("Client ID:", clientId);
+        console.log("Base URL:", baseUrl);
+        console.log("Access Token URL:", accessTokenBaseUrl);
+
+        // Test token generation
+        const tokenResponse = await getSandboxToken();
+        return {
+            success: true,
+            ip: ipInfo.ip,
+            tokenStatus: tokenResponse.status,
+            message: "DGFT connectivity test successful"
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message,
+            details: error.response?.data
+        };
+    }
+};
