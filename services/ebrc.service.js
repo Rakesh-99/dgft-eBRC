@@ -201,6 +201,13 @@ export const fileEbrcService = async (payload) => {
 
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
+        try {
+            const tokenPayload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64').toString());
+            console.log("=== TOKEN PAYLOAD ===");
+            console.log(tokenPayload);
+        } catch (e) {
+            console.error("Failed to decode access token:", e.message);
+        }
         console.log("Access token obtained successfully");
         console.log("Token length:", accessToken.length);
 
@@ -230,6 +237,7 @@ export const fileEbrcService = async (payload) => {
             "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
+            "x-api-key": apiKey
         };
 
         console.log("=== SENDING REQUEST ===");
