@@ -89,6 +89,7 @@ export const getSandboxToken = async () => {
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
+        console.log("FInal secret ", finalSecret);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
@@ -297,6 +298,7 @@ export const fileEbrcService = async (payload) => {
         // Create RSA digital signature - FIX: Sign the encrypted data
         const signature = createDigitalSignature(encryptionResult.encodedData);
         console.log("Signature created successfully");
+        console.log("Signature value:", signature);  // Add this line
 
         // Encrypt AES key with DGFT's public key
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
@@ -318,7 +320,7 @@ export const fileEbrcService = async (payload) => {
 
         console.log("=== SENDING REQUEST ===");
         console.log("Headers:", JSON.stringify(headers, null, 2));
-        console.log("Request body size:", JSON.stringify(requestBody).length);
+        console.log("Request Body:", JSON.stringify(requestBody, null, 2));
 
         // Make the request
         const response = await axios.post(endpoint, requestBody, {
