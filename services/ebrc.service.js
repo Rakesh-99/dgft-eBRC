@@ -237,7 +237,6 @@ export const fileEbrcService = async (payload) => {
             "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
-            "x-api-key": apiKey
         };
 
         console.log("=== SENDING REQUEST ===");
