@@ -11,7 +11,7 @@ const userPrivateKey = process.env.USER_PRIVATE_KEY;
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY?.replace(/\\n/g, '\n');
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
-// Valid currency codes from PDF (Annexure 6.4) - EXACT list, removing duplicates
+// Currency codes from DGFT specification
 const VALID_CURRENCY_CODES = [
     'USD', 'DEM', 'SGD', 'CHF', 'GBP', 'JPY', 'HKD', 'EUR', 'ITL', 'FRF',
     'AUD', 'SEK', 'CAD', 'BEF', 'DKK', 'FIM', 'NOK', 'ATS', 'INR', 'NLG',
@@ -27,15 +27,15 @@ const VALID_CURRENCY_CODES = [
     'PEN', 'PHP', 'PLN', 'ROL', 'RWF', 'SHP', 'XCD', 'SLL', 'SOS', 'LKR',
     'SDD', 'SRG', 'SZL', 'SYP', 'TWD', 'TZS', 'TOP', 'TTD', 'TND', 'TRL',
     'UGX', 'UAH', 'UYU', 'UZS', 'VEB', 'VND', 'WST', 'YER', 'ZMK', 'ZWD',
-    'TRY', 'KGS' // Removed RUR duplicate as PDF shows TRY separately
+    'RUR', 'TRY', 'KGS'
 ];
 
-// Error codes from PDF (Annexure 6.3) - EXACT match
+// Error codes from DGFT specification (Annexure 6.3)
 const ERROR_CODES = {
     '401': 'Unauthorized. Client Id and client secret not matched.',
     '403': 'Access forbidden, please verify the IP, client Id and client secret',
     'ERR01': 'Invalid client_Id and client_secret.',
-    'ERR02': 'Invalid header parameters, mandatory {param name} parameter is missing',
+    'ERR02': 'Invalid header parameters, mandatory parameter is missing',
     'ERR03': 'Invalid JSON.',
     'ERR04': 'Invalid secret val.',
     'ERR05': 'Invalid encryption key, not able to decrypt using the encryption key shared.',
@@ -75,7 +75,7 @@ const ERROR_CODES = {
     'ERR39': 'Invoice and purpose code mapping is not correct.'
 };
 
-// FIXED: Purpose codes EXACTLY as per PDF Annexures 6.1 & 6.2 - REMOVED P1001 (not in PDF)
+// Purpose codes from DGFT specification (Annexures 6.1 & 6.2)
 const VALID_PURPOSE_CODES = [
     // Inward Remittance (Annexure 6.1)
     'P0101', 'P0102', 'P0103', 'P0104', 'P0108', 'P0109',
@@ -90,7 +90,6 @@ const VALID_PURPOSE_CODES = [
     'P0801', 'P0802', 'P0803', 'P0804', 'P0805', 'P0806', 'P0807', 'P0808',
     'P0809',
     'P0901', 'P0902',
-    // REMOVED P1001 - NOT in PDF Annexure 6.1
     'P1002', 'P1003', 'P1004', 'P1005', 'P1006', 'P1007', 'P1008', 'P1009',
     'P1010', 'P1011', 'P1013', 'P1014', 'P1015', 'P1016', 'P1017', 'P1018',
     'P1019', 'P1020', 'P1021', 'P1022', 'P1099',
@@ -103,6 +102,7 @@ const VALID_PURPOSE_CODES = [
     'S1501', 'S1502', 'S1504'
 ];
 
+// Utility: Check current public IP
 export const checkCurrentIP = async () => {
     try {
         const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
@@ -115,17 +115,26 @@ export const checkCurrentIP = async () => {
     }
 };
 
-// FIXED: Token generation as per PDF specification
+// PBKDF2 password encryption with dynamic salt
 export const getSandboxToken = async () => {
     try {
+        console.log("=== TOKEN GENERATION (Step 3) ===");
+        
+        // Generate 32 bytes dynamic salt as per spec
         const salt = crypto.randomBytes(32);
+        console.log("32 bytes dynamic salt generated");
+        
+        // PBKDF2 encryption with iteration count 65536 and key length 256
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
-        // FIXED: Send only the derived key, not concatenated with salt
-        const finalSecret = derivedKey.toString("base64");
+        console.log("PBKDF2 encryption completed (65536 iterations, SHA256)");
+        
+        // String representation of dynamic salt byte appended with encrypted hash byte
+        const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
+        console.log("Final secret prepared: salt + hash encoded in base64");
 
-        console.log("=== TOKEN REQUEST DETAILS ===");
+        console.log("=== TOKEN REQUEST ===");
         console.log("Client ID:", clientId);
-        console.log("Final Secret Length:", finalSecret.length);
+        console.log("Endpoint:", `${accessTokenBaseUrl}/getAccessToken`);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
@@ -137,79 +146,111 @@ export const getSandboxToken = async () => {
                 headers: {
                     "Content-Type": "application/json",
                     "x-api-key": apiKey,
-                    "Accept": "application/json",
-                    "Cache-Control": "no-cache"
                 },
                 timeout: 15000
             }
         );
 
         console.log("Token response status:", response.status);
+        console.log("Token expires in:", response.data.expiresIn, "seconds");
         return response;
     } catch (error) {
-        console.error("=== TOKEN GENERATION ERROR ===");
+        console.error("=== TOKEN ERROR ===");
         console.error("Status:", error.response?.status);
         console.error("Response:", error.response?.data);
-        throw new Error(`Authentication failed with DGFT Sandbox: ${error.message}`);
+        
+        const status = error.response?.status?.toString();
+        const errorMsg = ERROR_CODES[status] || error.message;
+        throw new Error(`Authentication failed: ${errorMsg}`);
     }
 };
 
-// Helper: printable 32-char secret (keyboard characters)
-function generatePrintableSecret32() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
-    const rnd = crypto.randomBytes(32);
-    let s = '';
-    for (let i = 0; i < 32; i++) s += chars[rnd[i] % chars.length];
-    return s;
+//  Generate 32 character plain text dynamic key using keyboard characters
+function generate32CharKeyboardSecret() {
+    // As per spec: "API consumer shall use keyboard characters to generate the secret key"
+    // Allowed characters per spec: a-zA-z / - 0-9
+    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-';
+    let secret = '';
+    for (let i = 0; i < 32; i++) {
+        secret += keyboardChars[Math.floor(Math.random() * keyboardChars.length)];
+    }
+    console.log("32-character keyboard secret generated");
+    return secret;
 }
 
-// Helper function to generate dynamic AES key and encrypt payload
+//  AES key generation by salting secret key with 32 bytes using SHA256
+function generateAESKey(secretKey, salt) {
+    // As per spec: "AES 256 bits key is generated by salting secret key with 32 bytes salt using SHA256"
+    const keyBuffer = Buffer.from(secretKey, 'utf8');
+    const combined = Buffer.concat([keyBuffer, salt]);
+    const aesKey = crypto.createHash('sha256').update(combined).digest();
+    console.log("AES 256-bit key generated using SHA256 (secret + 32-byte salt)");
+    return aesKey;
+}
+
+// - Complete encryption process
 function encryptPayload(payload) {
     try {
+        console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
+        
+        // Step 1: Create message in JSON format
         const payloadJson = JSON.stringify(payload);
-
-        // Generate a 32-char printable secret
-        const secretPlain = generatePrintableSecret32();
-
-        // 32-byte random salt per spec
-        const salt = crypto.randomBytes(32);
-
-        // 12-byte IV for AES-GCM
-        const iv = crypto.randomBytes(12);
-
-        // Use PBKDF2 as per PDF specification
-        const saltedKey = crypto.pbkdf2Sync(secretPlain, salt, 65536, 32, "sha256");
-
-        const cipher = crypto.createCipheriv('aes-256-gcm', saltedKey, iv);
-        const encrypted = Buffer.concat([
-            cipher.update(payloadJson, 'utf8'), // FIXED: Encrypt JSON directly, not base64
-            cipher.final()
-        ]);
-        const authTag = cipher.getAuthTag();
-
-        // Combine iv + salt + ciphertext + authTag
-        const combined = Buffer.concat([iv, salt, encrypted, authTag]);
-        const encodedData = combined.toString('base64');
-
+        console.log("Step 1: JSON message created");
+        
+        // Step 2: Encode the JSON message using Base64 encoding
+        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
+        console.log("Step 2: JSON message Base64 encoded");
+        
+        // Step 3: Generate 32 characters plain text dynamic key using keyboard characters
+        const secretPlain = generate32CharKeyboardSecret();
+        console.log("Step 3: 32-character secret key generated");
+        
+        // Step 4: Generate AES key and encrypt message
+        const salt = crypto.randomBytes(32); // 32 bytes salt
+        const aesKey = generateAESKey(secretPlain, salt);
+        
+        // IV: First 12 bytes of cryptographic key as per Algorithm Specification
+        const iv = aesKey.slice(0, 12);
+        console.log("IV: First 12 bytes of AES key extracted");
+        
+        // Encrypt using AES-256-GCM with No Padding as per spec
+        const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+        let encrypted = cipher.update(payloadBase64, 'utf8');
+        encrypted = Buffer.concat([encrypted, cipher.final()]);
+        const authTag = cipher.getAuthTag(); // GCM Tag Length: 16 Bytes
+        console.log("Step 4: Message encrypted using AES-256-GCM");
+        
+        // Step 5: Combine IV + salt + encrypted message (as per spec format)
+        const encryptedWithTag = Buffer.concat([encrypted, authTag]);
+        const combinedData = Buffer.concat([iv, salt, encryptedWithTag]);
+        const encodedData = combinedData.toString('base64');
+        console.log("Step 5: Combined data (IV + salt + encrypted message) encoded");
+        
         return {
             secretPlain,
             encodedData,
-            payloadJson // Return JSON for signing
+            payloadBase64,  // For digital signature
+            salt,
+            aesKey
         };
-    } catch (encryptError) {
-        console.error("Encryption error:", encryptError);
-        throw new Error(`Payload encryption failed: ${encryptError.message}`);
+    } catch (error) {
+        console.error("Encryption failed:", error);
+        throw new Error(`Encryption failed: ${error.message}`);
     }
 }
 
-// Helper function to create digital signature
-function createDigitalSignature(dataToSign) {
+//  Digital signature using RSA-SHA256
+function createDigitalSignature(payloadBase64) {
     try {
+        console.log("=== DIGITAL SIGNATURE (Step 5) ===");
+        
         if (!userPrivateKey) {
-            throw new Error("USER_PRIVATE_KEY not found in environment variables");
+            throw new Error("USER_PRIVATE_KEY not found in environment");
         }
-        let privateKey = userPrivateKey.trim();
 
+        let privateKey = userPrivateKey.trim();
+        
+        // Format private key if needed
         if (!privateKey.startsWith('-----BEGIN')) {
             const lines = [];
             for (let i = 0; i < privateKey.length; i += 64) {
@@ -222,21 +263,29 @@ function createDigitalSignature(dataToSign) {
             ].join('\n');
         }
 
+        // Digitally sign the Base64 encoded message using RSA-SHA256
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(dataToSign);
+        signer.update(payloadBase64);
         const signature = signer.sign(privateKey, "base64");
+        
+        console.log("Digital signature created using RSA-SHA256");
         return signature;
-    } catch (signError) {
-        console.error("Signature error:", signError);
-        throw new Error(`Digital signature failed: ${signError.message}`);
+    } catch (error) {
+        console.error("Digital signature failed:", error);
+        throw new Error(`Digital signature failed: ${error.message}`);
     }
 }
 
-// Encrypt AES key with DGFT public key using OAEP-SHA256
+//  Encrypt secret key using DGFT public key with RSA
 function encryptAESKey(secretPlain) {
     try {
-        if (!dgftPublicKey) throw new Error("DGFT_PUBLIC_KEY not found in environment variables");
-
+        console.log("=== AES KEY ENCRYPTION (Step 5) ===");
+        
+        if (!dgftPublicKey) {
+            throw new Error("DGFT_PUBLIC_KEY not found in environment");
+        }
+        
+        // RSA encryption with OAEP and SHA256 padding as per Algorithm Specification
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
@@ -245,57 +294,75 @@ function encryptAESKey(secretPlain) {
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
-
+        
+        console.log("Secret key encrypted using RSA-OAEP-SHA256");
         return encryptedKey;
-    } catch (keyError) {
-        console.error("AES key encryption error:", keyError);
-        throw new Error(`AES key encryption failed: ${keyError.message}`);
+    } catch (error) {
+        console.error("AES key encryption failed:", error);
+        throw new Error(`AES key encryption failed: ${error.message}`);
     }
 }
 
-// Decrypt and verify DGFT response using same secret and dgftPublicKey
-function decryptResponse(responseBody, secretPlain) {
+//  Response decryption
+function decryptResponse(responseBody, secretPlain, salt) {
     try {
+        console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
+        
+        // Step 1: Decode the response data
         const combined = Buffer.from(responseBody.data, 'base64');
+        
+        // Extract components: IV (12) + salt (32) + encrypted data + authTag (16)
         const iv = combined.slice(0, 12);
-        const salt = combined.slice(12, 44);
-        const authTag = combined.slice(combined.length - 16);
-        const ciphertext = combined.slice(44, combined.length - 16);
+        const responseSalt = combined.slice(12, 44);
+        const encryptedWithTag = combined.slice(44);
+        const authTag = encryptedWithTag.slice(-16);
+        const ciphertext = encryptedWithTag.slice(0, -16);
+        
+        console.log("Step 1: Response data components extracted");
 
-        // PBKDF2 for response decryption
-        const saltedKey = crypto.pbkdf2Sync(secretPlain, salt, 65536, 32, "sha256");
+        // Step 2: Generate AES key using same method as encryption
+        const aesKey = generateAESKey(secretPlain, salt);
+        console.log("Step 2: AES key regenerated for decryption");
 
-        const decipher = crypto.createDecipheriv('aes-256-gcm', saltedKey, iv);
+        // Step 3: Decrypt the data using AES-256-GCM
+        const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
         decipher.setAuthTag(authTag);
-        const decrypted = Buffer.concat([
-            decipher.update(ciphertext),
-            decipher.final()
-        ]);
+        let decrypted = decipher.update(ciphertext);
+        decrypted = Buffer.concat([decrypted, decipher.final()]);
+        console.log("Step 3: Data decrypted using AES-256-GCM");
 
-        const payloadJson = decrypted.toString('utf8');
+        // The decrypted data should be Base64 encoded JSON
+        const payloadBase64 = decrypted.toString('utf8');
+        const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
 
-        // Verify signature
-        const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(payloadJson);
-        const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
-        if (!isVerified) {
-            throw new Error('Response signature verification failed');
+        // Step 4: Verify digital signature
+        if (!dgftPublicKey) {
+            throw new Error("DGFT_PUBLIC_KEY required for signature verification");
         }
+        
+        const verifier = crypto.createVerify('RSA-SHA256');
+        verifier.update(payloadBase64);
+        const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
+        
+        if (!isVerified) {
+            throw new Error('Response digital signature verification failed');
+        }
+        console.log("Step 4: Digital signature verified successfully");
 
         return JSON.parse(payloadJson);
-    } catch (decryptError) {
-        console.error("Decryption error:", decryptError);
-        throw new Error(`Response decryption failed: ${decryptError.message}`);
+    } catch (error) {
+        console.error("Response decryption failed:", error);
+        throw new Error(`Response decryption failed: ${error.message}`);
     }
 }
 
-// ENHANCED: Validate payload with stricter date validation and missing field checks
+//  Payload validation
 function validatePayload(payload) {
     const errors = [];
 
-    // Required fields as per PDF
+    // Required fields validation
     const requiredFields = [
-        'messageId', 'purposeCode', 'irmNumber', 'irmDate', 'adCode', 'amount'
+        'iecNumber', 'requestId', 'recordResCount', 'uploadType', 'decalarationFlag', 'ebrcBulkGenDtos'
     ];
 
     requiredFields.forEach(field => {
@@ -304,294 +371,342 @@ function validatePayload(payload) {
         }
     });
 
-    // Validate purpose code (ERR21) - UPPERCASE only
-    if (payload.purposeCode) {
-        if (!VALID_PURPOSE_CODES.includes(payload.purposeCode.toUpperCase())) {
-            errors.push('ERR21: Invalid purpose code');
-        }
-    }
-
-    // Validate currency code - UPPERCASE only
-    if (payload.currencyCode) {
-        if (!VALID_CURRENCY_CODES.includes(payload.currencyCode.toUpperCase())) {
-            errors.push('Invalid currency code');
-        }
-    }
-
-    // Validate messageId length (ERR07)
-    if (payload.messageId && payload.messageId.length > 50) {
-        errors.push('ERR07: Invalid messageId, its length shall not be greater than 50');
-    }
-
-    // Validate IFSC code (ERR14)
-    if (payload.ifscCode && payload.ifscCode.length !== 11) {
-        errors.push('ERR14: Invalid IFSC code, its length shall be 11 digit');
-    }
-
-    // ENHANCED: Strict date validation function
-    function isValidDate(dateStr) {
-        if (!/^\d{8}$/.test(dateStr)) return false;
-
-        const day = parseInt(dateStr.substring(0, 2));
-        const month = parseInt(dateStr.substring(2, 4));
-        const year = parseInt(dateStr.substring(4, 8));
-
-        if (month < 1 || month > 12) return false;
-        if (day < 1 || day > 31) return false;
-        if (year < 1900 || year > 2100) return false;
-
-        // Check days in month
-        const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-        if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) {
-            daysInMonth[1] = 29; // Leap year
-        }
-
-        return day <= daysInMonth[month - 1];
-    }
-
-    // Validate date fields with strict validation
-    const dateFields = [
-        { field: 'irmDate', errorCode: 'ERR17', required: true },
-        { field: 'paymentDate', errorCode: 'ERR24', required: false },
-        { field: 'shippingBillDate', errorCode: 'ERR28', required: false },
-        { field: 'softexDate', errorCode: 'ERR28', required: false },
-        { field: 'invoiceDate', errorCode: 'ERR28', required: false }
-    ];
-
-    dateFields.forEach(({ field, errorCode, required }) => {
-        if (payload[field]) {
-            if (!isValidDate(payload[field])) {
-                errors.push(`${errorCode}: Invalid ${field} field. Date shall be in ddMMYYYY format`);
-            }
-        } else if (required) {
-            errors.push(`ERR02: Invalid header parameters, mandatory ${field} parameter is missing`);
-        }
-    });
-
-    // Validate nested object dates
-    if (payload.shipmentDetails?.invoiceDate) {
-        if (!isValidDate(payload.shipmentDetails.invoiceDate)) {
-            errors.push('ERR28: Invalid invoiceDate in shipmentDetails. Date shall be in ddMMYYYY format');
-        }
-    }
-
-    // ADDED: Softex number validation (ERR26)
-    if (payload.softexNumber && payload.softexNumber.toString().length > 7) {
-        errors.push('ERR26: Invalid Softex number in the application');
-    }
-
-    // ADDED: Invoice number validation (ERR27)
-    if (payload.invoiceNumber && payload.invoiceNumber.toString().length > 20) {
-        errors.push('ERR27: Invalid invoice number mentioned');
-    }
-
-    // Validate shipping bill number (ERR25)
-    if (payload.shippingBillNumber && payload.shippingBillNumber.toString().length > 7) {
-        errors.push('ERR25: Invalid shipping bill number. It cannot be greater than 7 digit');
-    }
-
-    // Validate port code (ERR29)
-    if (payload.portCode && payload.portCode.toString().length > 6) {
-        errors.push('ERR29: Invalid port code mentioned. Port code cannot be greater than 6 digit in length');
-    }
-
-    // Validate billNo (ERR31)
-    if (payload.billNo && payload.billNo.toString().length > 20) {
-        errors.push('ERR31: Invalid billNo its values cannot be greater than 20 digit length');
-    }
-
-    // Validate Vostro flag (ERR32)
-    if (payload.isVostro && !['Y', 'N'].includes(payload.isVostro.toUpperCase())) {
-        errors.push('ERR32: Invalid values for isVostro flag. Allowed values are Y/N');
-    }
-
-    // Validate Vostro type (ERR33)
-    if (payload.vostroType && !['SVRA', 'NVRA'].includes(payload.vostroType.toUpperCase())) {
-        errors.push('ERR33: Invalid vostro type specified. Allowed values are SVRA/NVRA');
-    }
-
-    // Validate 3rd party export flag (ERR34)
-    if (payload.thirdPartyExport && !['Y', 'N'].includes(payload.thirdPartyExport.toUpperCase())) {
-        errors.push('ERR34: Invalid 3rd party export flag. Allowed values are Y/N');
-    }
-
-    // ADDED: Declaration flag validation (ERR36, ERR37)
-    if (payload.declarationFlag === undefined || payload.declarationFlag === null || payload.declarationFlag === '') {
+    // Declaration flag validation (ERR36, ERR37)
+    if (!payload.decalarationFlag) {
         errors.push('ERR36: Declaration flag is missing');
-    } else if (!['Y', 'N'].includes(payload.declarationFlag.toUpperCase())) {
+    } else if (!['Y', 'N'].includes(payload.decalarationFlag.toUpperCase())) {
         errors.push('ERR37: Invalid values specified for declaration flag');
     }
 
-    // Validate amount (ERR35)
-    if (payload.amount && (isNaN(payload.amount) || payload.amount <= 0)) {
-        errors.push('ERR35: Invalid ORM amount specified');
+    // Message ID length validation (ERR07)
+    if (payload.requestId && payload.requestId.length > 50) {
+        errors.push('ERR07: Invalid messageId, its length shall not be greater than 50');
+    }
+
+    // Record count validation (ERR08)
+    if (payload.ebrcBulkGenDtos && Array.isArray(payload.ebrcBulkGenDtos)) {
+        if (payload.recordResCount !== payload.ebrcBulkGenDtos.length) {
+            errors.push('ERR08: Count mismatches. Total number of record in header and data shared not match');
+        }
+
+        // Validate each record
+        const serialNumbers = new Set();
+        const clubIds = new Set();
+
+        payload.ebrcBulkGenDtos.forEach((dto, index) => {
+            const recordNum = index + 1;
+
+            // Serial number validation (ERR10, ERR11)
+            if (!dto.serialNo) {
+                errors.push(`ERR10: Invalid serial number in record ${recordNum}`);
+            } else if (serialNumbers.has(dto.serialNo)) {
+                errors.push(`ERR11: Duplicate serial number in same message - record ${recordNum}`);
+            } else {
+                serialNumbers.add(dto.serialNo);
+            }
+
+            // Club ID validation (ERR12, ERR13)
+            if (dto.clubId) {
+                if (clubIds.has(dto.clubId)) {
+                    errors.push(`ERR13: Duplicate clubID in same request message - record ${recordNum}`);
+                } else {
+                    clubIds.add(dto.clubId);
+                }
+            }
+
+            // IFSC code validation (ERR14)
+            if (dto.irmIfscCode && dto.irmIfscCode.length !== 11) {
+                errors.push(`ERR14: Invalid IFSC code, its length shall be 11 digit in record ${recordNum}`);
+            }
+
+            // Date format validation (ERR17, ERR24, ERR28)
+            function isValidDateFormat(dateStr) {
+                if (!/^\d{8}$/.test(dateStr)) return false;
+                const day = parseInt(dateStr.substring(0, 2));
+                const month = parseInt(dateStr.substring(2, 4));
+                const year = parseInt(dateStr.substring(4, 8));
+                
+                if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+                if (year < 1900 || year > 2100) return false;
+                
+                const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+                if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) {
+                    daysInMonth[1] = 29;
+                }
+                
+                return day <= daysInMonth[month - 1];
+            }
+
+            if (dto.irmDt && !isValidDateFormat(dto.irmDt)) {
+                errors.push(`ERR17: Invalid IRM Date. Date shall be in ddMMYYYY format in record ${recordNum}`);
+            }
+
+            if (dto.paymentDate && !isValidDateFormat(dto.paymentDate)) {
+                errors.push(`ERR24: Invalid paymentDate field in request JSON. Field is null or not in format ddMMyyyy in record ${recordNum}`);
+            }
+
+            if (dto.sbCumInvoiceDate && !isValidDateFormat(dto.sbCumInvoiceDate)) {
+                errors.push(`ERR28: Invalid shipping bill/ SOFTEX or invoice date field in record ${recordNum}`);
+            }
+
+            // Purpose code validation (ERR21)
+            if (dto.irmPurposeCode && !VALID_PURPOSE_CODES.includes(dto.irmPurposeCode.toUpperCase())) {
+                errors.push(`ERR21: Invalid purpose code in record ${recordNum}`);
+            }
+
+            // Currency code validation
+            if (dto.irmFCC && !VALID_CURRENCY_CODES.includes(dto.irmFCC.toUpperCase())) {
+                errors.push(`Invalid currency code ${dto.irmFCC} in record ${recordNum}`);
+            }
+
+            // Shipping bill number validation (ERR25)
+            if (dto.shippingBillNo && dto.shippingBillNo.toString().length > 7) {
+                errors.push(`ERR25: Invalid shipping bill number. It cannot be greater than 7 digit in record ${recordNum}`);
+            }
+
+            // Port code validation (ERR29)
+            if (dto.portCode && dto.portCode.toString().length > 6) {
+                errors.push(`ERR29: Invalid port code mentioned. Port code cannot be greater than 6 digit in length in record ${recordNum}`);
+            }
+
+            // Bill number validation (ERR31)
+            if (dto.billNo && dto.billNo.toString().length > 20) {
+                errors.push(`ERR31: Invalid billNo its values cannot be greater than 20 digit length in record ${recordNum}`);
+            }
+
+            // Vostro flag validation (ERR32)
+            if (dto.isVostro && !['Y', 'N'].includes(dto.isVostro.toUpperCase())) {
+                errors.push(`ERR32: Invalid values for isVostro flag. Allowed values are Y/N in record ${recordNum}`);
+            }
+
+            // Vostro type validation (ERR33)
+            if (dto.vostroType && !['SVRA', 'NVRA'].includes(dto.vostroType.toUpperCase())) {
+                errors.push(`ERR33: Invalid vostro type specified. Allowed values are SVRA/NVRA in record ${recordNum}`);
+            }
+
+            // Amount validation (ERR35)
+            if (dto.irmRemitAmtFCC && (isNaN(dto.irmRemitAmtFCC) || dto.irmRemitAmtFCC <= 0)) {
+                errors.push(`ERR35: Invalid ORM amount specified in record ${recordNum}`);
+            }
+        });
     }
 
     if (errors.length > 0) {
         throw new Error(errors.join('; '));
     }
+
+    console.log("Payload validation successful");
 }
 
-// Main function to file/submit data on eBRC DGFT in sandbox environment
+// File eBRC data :
 export const fileEbrcService = async (payload) => {
     try {
         console.log("=== eBRC FILING REQUEST STARTED ===");
         console.log("Client ID:", clientId);
-        console.log("Base URL:", baseUrl);
+        console.log("Sandbox URL:", baseUrl);
+        console.log("Timestamp:", new Date().toISOString());
 
-        let systemIP = await checkCurrentIP();
-        console.log(" System Public IP:", systemIP.ip);
+        // Check current IP for troubleshooting
+        const systemIP = await checkCurrentIP();
 
-        // Comprehensive payload validation against PDF specs
-        console.log("Validating payload...");
+        // Validate payload against DGFT specifications
+        console.log("Validating payload against DGFT specifications...");
         validatePayload(payload);
-        console.log("Payload validation successful");
 
-        // Get access token
+        // Step 4: Get access token (valid for 5 minutes)
         console.log("Obtaining access token...");
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
-
-        try {
-            const tokenPayload = JSON.parse(Buffer.from(accessToken.split('.')[1], 'base64').toString());
-            console.log("=== TOKEN PAYLOAD ===");
-            console.log("Token issued at:", new Date(tokenPayload.iat * 1000));
-            console.log("Token expires at:", new Date(tokenPayload.exp * 1000));
-        } catch (e) {
-            console.error("Failed to decode access token:", e.message);
-        }
-
         console.log("Access token obtained successfully");
 
-        const endpoint = `${baseUrl}/pushIRMToGenEBRC`;
-        console.log("Endpoint:", endpoint);
-
-        // Encrypt payload using AES-256-GCM
-        console.log("Encrypting payload...");
+        // Steps 1-5: Encryption and signature process
+        console.log("Starting encryption and signature process...");
         const encryptionResult = encryptPayload(payload);
-        console.log("Payload encrypted successfully");
-
-        // FIXED: Sign the JSON payload directly as per PDF spec
-        console.log("Creating digital signature...");
-        const signature = createDigitalSignature(encryptionResult.payloadJson);
-        console.log("Signature created successfully");
-
-        // Encrypt AES key with DGFT's public key
-        console.log("Encrypting AES key...");
+        const digitalSignature = createDigitalSignature(encryptionResult.payloadBase64);
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
-        console.log("AES key encrypted successfully");
 
-        // Prepare the request body as per DGFT spec
+        // Step 6: Prepare request as per specification
         const requestBody = {
             data: encryptionResult.encodedData,
-            sign: signature
+            sign: digitalSignature
         };
 
+        // Generate messageID if not provided
+        const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
+
+        // Step 6: Headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
-            "x-api-key": apiKey,
-            "Accept": "application/json",
-            "Cache-Control": "no-cache"
-            // REMOVED: Custom User-Agent not specified in PDF
+            "messageID": messageID
         };
 
         console.log("=== SENDING REQUEST TO DGFT ===");
-        console.log("Endpoint:", endpoint);
-        console.log("Headers (sanitized):", {
-            "Content-Type": headers["Content-Type"],
-            "client_id": headers["client_id"],
-            "x-api-key": headers["x-api-key"] ? `${headers["x-api-key"].substring(0, 8)}...` : 'MISSING',
-            "accessToken": headers["accessToken"] ? `${headers["accessToken"].substring(0, 20)}...` : 'MISSING',
-            "secretVal": headers["secretVal"] ? `${headers["secretVal"].substring(0, 20)}...` : 'MISSING'
-        });
-        console.log("Request body data length:", requestBody.data.length);
-        console.log("Request body sign length:", requestBody.sign.length);
+        console.log("Endpoint:", `${baseUrl}/pushIRMToGenEBRC`);
+        console.log("Message ID:", messageID);
+        console.log("Request body size:", JSON.stringify(requestBody).length, "bytes");
 
-        const response = await axios.post(endpoint, requestBody, {
-            headers: headers,
+        // Make API call with 30-second timeout
+        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
+            headers,
             timeout: 30000
         });
 
+        console.log("=== RESPONSE RECEIVED ===");
+        console.log("HTTP Status:", response.status);
         console.log("Response received from DGFT");
-        console.log("Response status:", response.status);
 
-        // Decrypt and verify the response
-        console.log("Decrypting response...");
-        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain);
+        // Step 7: Decrypt and verify response
+        console.log("Decrypting and verifying response...");
+        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain, encryptionResult.salt);
 
         console.log("=== eBRC FILING SUCCESSFUL ===");
-        console.log("Response decrypted and verified successfully");
         return {
             success: true,
+            messageID: messageID,
             data: decryptedData,
-            message: "eBRC data filed successfully"
+            message: "eBRC data filed successfully with DGFT",
+            timestamp: new Date().toISOString(),
+            systemIP: systemIP.ip
         };
 
     } catch (error) {
         console.error("=== eBRC FILING ERROR ===");
-        console.error("Error type:", error.constructor.name);
-        console.error("Error message:", error.message);
+        console.error("Error:", error.message);
+        console.error("Timestamp:", new Date().toISOString());
 
         if (error.response) {
             console.error("HTTP Status:", error.response.status);
-            console.error("Response data:", JSON.stringify(error.response.data, null, 2));
-            console.error("Response headers:", JSON.stringify(error.response.headers, null, 2));
+            console.error("Response Headers:", error.response.headers);
+            console.error("Response Data:", error.response.data);
 
-            // Enhanced error mapping based on PDF error codes
             const status = error.response.status.toString();
-            const responseData = error.response.data;
-            let errorMsg = ERROR_CODES[status];
-
-            // Check for specific error codes in response
-            if (responseData?.errorCode) {
-                errorMsg = ERROR_CODES[responseData.errorCode] || responseData.errorCode;
-            } else if (responseData?.error) {
-                errorMsg = responseData.error;
-            } else if (responseData?.message) {
-                errorMsg = responseData.message;
-            }
-
-            throw new Error(errorMsg || `HTTP ${status}: ${error.message}`);
-        } else if (error.request) {
-            console.error("No response received from server");
-            console.error("Request timeout or network error");
-            throw new Error("Network error: No response received from DGFT server");
-        } else {
-            console.error("Request setup error:", error.message);
-            throw new Error(`Request configuration error: ${error.message}`);
+            const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
+            
+            return {
+                success: false,
+                error: errorMsg,
+                httpStatus: error.response.status,
+                timestamp: new Date().toISOString(),
+                details: error.response.data
+            };
         }
-    }
-};
 
-// Export validation function for external use
-export const validateEbrcPayload = validatePayload;
-
-// Add connectivity test function
-export const testDGFTConnectivity = async () => {
-    try {
-        console.log("=== TESTING DGFT CONNECTIVITY ===");
-        const ipInfo = await checkCurrentIP();
-        console.log("Current IP:", ipInfo.ip);
-        console.log("Client ID:", clientId);
-        console.log("Base URL:", baseUrl);
-        console.log("Access Token URL:", accessTokenBaseUrl);
-
-        // Test token generation
-        const tokenResponse = await getSandboxToken();
-        return {
-            success: true,
-            ip: ipInfo.ip,
-            tokenStatus: tokenResponse.status,
-            message: "DGFT connectivity test successful"
-        };
-    } catch (error) {
         return {
             success: false,
             error: error.message,
-            details: error.response?.data
+            timestamp: new Date().toISOString()
         };
     }
 };
+
+// UTILITY: Get processing status (Step 10 - Wait 2 hours between push and get)
+export const getEbrcStatus = async (messageId) => {
+    try {
+        console.log("=== GET eBRC STATUS ===");
+        console.log("Message ID:", messageId);
+        
+        // Get fresh access token
+        const tokenResponse = await getSandboxToken();
+        const accessToken = tokenResponse.data.accessToken;
+
+        const headers = {
+            "Content-Type": "application/json",
+            "accessToken": accessToken,
+            "client_id": clientId,
+            "x-api-key": apiKey
+        };
+
+        const response = await axios.get(
+            `${baseUrl}/getProcessingStatus/${messageId}`,
+            { headers, timeout: 15000 }
+        );
+
+        return {
+            success: true,
+            data: response.data,
+            message: "Status retrieved successfully"
+        };
+
+    } catch (error) {
+        console.error("Status check failed:", error.message);
+        
+        if (error.response) {
+            const status = error.response.status.toString();
+            const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
+            throw new Error(errorMsg);
+        }
+        
+        throw error;
+    }
+};
+
+// SAMPLE PAYLOAD: Example payload structure as per DGFT specification
+export const createSamplePayload = () => {
+    return {
+        "iecNumber": "1234567890",
+        "requestId": `MSG_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
+        "recordResCount": 1,
+        "uploadType": "IRM",
+        "decalarationFlag": "Y",
+        "ebrcBulkGenDtos": [
+            {
+                "serialNo": 1,
+                "clubId": "CLUB001",
+                "irmIfscCode": "SBIN0000123", // 11 characters as required
+                "irmAdCode": "AD001",
+                "irmNumber": "IRM123456789",
+                "irmDt": "15092024", // ddMMYYYY format
+                "irmFCC": "USD", // Valid currency code
+                "irmPurposeCode": "P0101", // Valid purpose code
+                "irmRemitAmtFCC": 10000.00,
+                "irmAvailableAmtFCC": 10000.00,
+                "paymentDate": "15092024", // ddMMYYYY format
+                "shippingBillNo": "SB12345", // Max 7 digits
+                "sbCumInvoiceDate": "15092024", // ddMMYYYY format
+                "invoiceNumber": "INV001",
+                "portCode": "INMAA1", // Max 6 characters
+                "billNo": "BILL001", // Max 20 characters
+                "isVostro": "N", // Y or N
+                "vostroType": "SVRA", // SVRA or NVRA
+                "thirdPartyExport": "N", // Y or N
+                "ormAmount": 10000.00,
+                "remarks": "Sample eBRC generation"
+            }
+        ]
+    };
+};
+
+// CONFIGURATION VALIDATOR: Check environment variables
+export const validateConfiguration = () => {
+    const requiredEnvVars = [
+        'CLIENT_SECRET',
+        'DGFT_SANDBOX_URL',
+        'X_API_KEY', 
+        'CLIENT_ID',
+        'USER_PRIVATE_KEY',
+        'DGFT_PUBLIC_KEY',
+        'ACCESS_TOKEN_URL'
+    ];
+
+    const missing = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missing.length > 0) {
+        throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    }
+
+    // Validate key formats
+    if (!dgftPublicKey?.includes('BEGIN CERTIFICATE') && !dgftPublicKey?.includes('BEGIN PUBLIC KEY')) {
+        console.warn("DGFT_PUBLIC_KEY format may be incorrect");
+    }
+
+    if (!userPrivateKey?.includes('BEGIN PRIVATE KEY') && !userPrivateKey?.includes('BEGIN RSA PRIVATE KEY')) {
+        console.warn("USER_PRIVATE_KEY format may be incorrect");
+    }
+
+    console.log("✅ Configuration validation passed");
+    return true;
+};
+
