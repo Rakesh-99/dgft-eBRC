@@ -10,19 +10,9 @@ const clientId = process.env.CLIENT_ID;
 const userPrivateKey = process.env.USER_PRIVATE_KEY;
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY?.replace(/\\n/g, '\n');
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
+const currentIP = process.env.CURRENT_IP;
 
 
-
-// 🔹 helper fn() to get current public IP of system : --> 
-const getCurrentIP = async () => {
-    try {
-        const response = await axios.get('https://api.ipify.org?format=json');
-        return await response.data.ip;
-    } catch (error) {
-        console.log("Could not detect public IP:", error.message);
-        return "Unknown";
-    }
-};
 
 //  generating  Sandbox Token : ---> 
 export const getSandboxToken = async () => {
@@ -203,45 +193,49 @@ function decryptResponse(responseBody, secretPlain) {
 
 //   Step 2. fn() to fill/submit data on eBRC dgft in sandbox envirenment with IP detection : --> 
 export const fileEbrcService = async (payload) => {
-    let currentIP = "Unknown";
-
     try {
-        currentIP = await getCurrentIP();
-        console.log(" Current public IP:", currentIP);
+        console.log("=== REQUEST DEBUG ===");
+        console.log("Current public IP:", currentIP);
+        console.log("Client ID:", clientId);
+        console.log("Base URL:", baseUrl);
 
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
-        console.log(" Token obtained successfully");
+        console.log("Access token obtained successfully");
+        console.log("Token length:", accessToken.length);
 
-        //  sandbox endpoint
         const endpoint = `${baseUrl}/pushIRMToGenEBRC`;
-
+        console.log("Endpoint:", endpoint);
 
         // Encrypt payload using AES-256-GCM
         const encryptionResult = encryptPayload(payload);
+        console.log("Payload encrypted successfully");
 
-
-        // Create RSA digital signature
-
-        const signature = createDigitalSignature(encryptionResult.payloadBase64);
+        // Create RSA digital signature - FIX: Sign the encrypted data
+        const signature = createDigitalSignature(encryptionResult.encodedData);
+        console.log("Signature created successfully");
 
         // Encrypt AES key with DGFT's public key
-
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+        console.log("AES key encrypted successfully");
 
         // Prepare the request body as per DGFT spec
         const requestBody = {
-            data: encryptionResult.encodedData, // base64(iv+salt+cipher+authTag)
+            data: encryptionResult.encodedData,
             sign: signature
         };
 
-        //  headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
         };
+
+        console.log("=== SENDING REQUEST ===");
+        console.log("Headers:", JSON.stringify(headers, null, 2));
+        console.log("Request body size:", JSON.stringify(requestBody).length);
+
         // Make the request
         const response = await axios.post(endpoint, requestBody, {
             headers: headers,
@@ -255,15 +249,27 @@ export const fileEbrcService = async (payload) => {
         return decryptedData;
 
     } catch (error) {
-        console.error("DGFT Filing Error:", error.response?.status, error.response?.data || error.message);
+        console.error("=== ERROR ANALYSIS ===");
+        console.error("Error type:", error.constructor.name);
+        console.error("Error message:", error.message);
 
+        if (error.response) {
+            console.error("Response status:", error.response.status);
+            console.error("Response data:", error.response.data);
+            console.error("Response headers:", JSON.stringify(error.response.headers, null, 2));
+        } else if (error.request) {
+            console.error("No response received:", error.request);
+        } else {
+            console.error("Request setup error:", error.message);
+        }
+
+        if (error.response?.status === 401) {
+            throw new Error('Authentication failed, please verify the client Id and client secret');
+        }
         if (error.response?.status === 403) {
-            // useful actionable message for IP-whitelisting
-            console.error(`IP Whitelisting Required! Add ${currentIP} to DGFT sandbox portal`);
             throw new Error(`IP Whitelisting Required: Add ${currentIP} to DGFT sandbox portal`);
         }
 
-        const errMsg = error.response?.data?.message || error.message || 'Filing failed';
-        throw new Error(`DGFT API Error: ${errMsg}`);
+        throw new Error(`Request failed: ${error.message}`);
     }
 };
