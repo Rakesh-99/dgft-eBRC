@@ -188,6 +188,7 @@ function generateAESKey(secretKey, salt) {
     return aesKey;
 }
 
+
 // - Complete encryption process
 function encryptPayload(payload) {
     try {
@@ -304,7 +305,7 @@ function encryptAESKey(secretPlain) {
 }
 
 //  Response decryption
-function decryptResponse(responseBody, secretPlain, salt) {
+function decryptResponse(responseBody, secretPlain, _requestSalt) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
 
@@ -313,15 +314,15 @@ function decryptResponse(responseBody, secretPlain, salt) {
 
         // Extract components: IV (12) + salt (32) + encrypted data + authTag (16)
         const iv = combined.slice(0, 12);
-        const responseSalt = combined.slice(12, 44);
+        const responseSalt = combined.slice(12, 44); // Use DGFT's salt from response
         const encryptedWithTag = combined.slice(44);
         const authTag = encryptedWithTag.slice(-16);
         const ciphertext = encryptedWithTag.slice(0, -16);
 
         console.log("Step 1: Response data components extracted");
 
-        // Step 2: Generate AES key using same method as encryption
-        const aesKey = generateAESKey(secretPlain, salt);
+        // Step 2: Generate AES key using DGFT's salt from response
+        const aesKey = generateAESKey(secretPlain, responseSalt);
         console.log("Step 2: AES key regenerated for decryption");
 
         // Step 3: Decrypt the data using AES-256-GCM
