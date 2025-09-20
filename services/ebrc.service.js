@@ -119,15 +119,15 @@ export const checkCurrentIP = async () => {
 export const getSandboxToken = async () => {
     try {
         console.log("=== TOKEN GENERATION (Step 3) ===");
-        
+
         // Generate 32 bytes dynamic salt as per spec
         const salt = crypto.randomBytes(32);
         console.log("32 bytes dynamic salt generated");
-        
+
         // PBKDF2 encryption with iteration count 65536 and key length 256
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         console.log("PBKDF2 encryption completed (65536 iterations, SHA256)");
-        
+
         // String representation of dynamic salt byte appended with encrypted hash byte
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
         console.log("Final secret prepared: salt + hash encoded in base64");
@@ -158,7 +158,7 @@ export const getSandboxToken = async () => {
         console.error("=== TOKEN ERROR ===");
         console.error("Status:", error.response?.status);
         console.error("Response:", error.response?.data);
-        
+
         const status = error.response?.status?.toString();
         const errorMsg = ERROR_CODES[status] || error.message;
         throw new Error(`Authentication failed: ${errorMsg}`);
@@ -192,40 +192,40 @@ function generateAESKey(secretKey, salt) {
 function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
-        
+
         // Step 1: Create message in JSON format
         const payloadJson = JSON.stringify(payload);
         console.log("Step 1: JSON message created");
-        
+
         // Step 2: Encode the JSON message using Base64 encoding
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
         console.log("Step 2: JSON message Base64 encoded");
-        
+
         // Step 3: Generate 32 characters plain text dynamic key using keyboard characters
         const secretPlain = generate32CharKeyboardSecret();
         console.log("Step 3: 32-character secret key generated");
-        
+
         // Step 4: Generate AES key and encrypt message
         const salt = crypto.randomBytes(32); // 32 bytes salt
         const aesKey = generateAESKey(secretPlain, salt);
-        
+
         // IV: First 12 bytes of cryptographic key as per Algorithm Specification
         const iv = aesKey.slice(0, 12);
         console.log("IV: First 12 bytes of AES key extracted");
-        
+
         // Encrypt using AES-256-GCM with No Padding as per spec
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         let encrypted = cipher.update(payloadBase64, 'utf8');
         encrypted = Buffer.concat([encrypted, cipher.final()]);
         const authTag = cipher.getAuthTag(); // GCM Tag Length: 16 Bytes
         console.log("Step 4: Message encrypted using AES-256-GCM");
-        
+
         // Step 5: Combine IV + salt + encrypted message (as per spec format)
         const encryptedWithTag = Buffer.concat([encrypted, authTag]);
         const combinedData = Buffer.concat([iv, salt, encryptedWithTag]);
         const encodedData = combinedData.toString('base64');
         console.log("Step 5: Combined data (IV + salt + encrypted message) encoded");
-        
+
         return {
             secretPlain,
             encodedData,
@@ -243,13 +243,13 @@ function encryptPayload(payload) {
 function createDigitalSignature(payloadBase64) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
-        
+
         if (!userPrivateKey) {
             throw new Error("USER_PRIVATE_KEY not found in environment");
         }
 
         let privateKey = userPrivateKey.trim();
-        
+
         // Format private key if needed
         if (!privateKey.startsWith('-----BEGIN')) {
             const lines = [];
@@ -267,7 +267,7 @@ function createDigitalSignature(payloadBase64) {
         const signer = crypto.createSign("RSA-SHA256");
         signer.update(payloadBase64);
         const signature = signer.sign(privateKey, "base64");
-        
+
         console.log("Digital signature created using RSA-SHA256");
         return signature;
     } catch (error) {
@@ -280,11 +280,11 @@ function createDigitalSignature(payloadBase64) {
 function encryptAESKey(secretPlain) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 5) ===");
-        
+
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY not found in environment");
         }
-        
+
         // RSA encryption with OAEP and SHA256 padding as per Algorithm Specification
         const encryptedKey = crypto.publicEncrypt(
             {
@@ -294,7 +294,7 @@ function encryptAESKey(secretPlain) {
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
-        
+
         console.log("Secret key encrypted using RSA-OAEP-SHA256");
         return encryptedKey;
     } catch (error) {
@@ -307,17 +307,17 @@ function encryptAESKey(secretPlain) {
 function decryptResponse(responseBody, secretPlain, salt) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
-        
+
         // Step 1: Decode the response data
         const combined = Buffer.from(responseBody.data, 'base64');
-        
+
         // Extract components: IV (12) + salt (32) + encrypted data + authTag (16)
         const iv = combined.slice(0, 12);
         const responseSalt = combined.slice(12, 44);
         const encryptedWithTag = combined.slice(44);
         const authTag = encryptedWithTag.slice(-16);
         const ciphertext = encryptedWithTag.slice(0, -16);
-        
+
         console.log("Step 1: Response data components extracted");
 
         // Step 2: Generate AES key using same method as encryption
@@ -339,11 +339,11 @@ function decryptResponse(responseBody, secretPlain, salt) {
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY required for signature verification");
         }
-        
+
         const verifier = crypto.createVerify('RSA-SHA256');
         verifier.update(payloadBase64);
         const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
-        
+
         if (!isVerified) {
             throw new Error('Response digital signature verification failed');
         }
@@ -405,6 +405,12 @@ function validatePayload(payload) {
                 serialNumbers.add(dto.serialNo);
             }
 
+
+            // Block P0101 and P0108 as per latest DGFT guidelines
+            if (dto.irmPurposeCode && ['P0101', 'P0108'].includes(dto.irmPurposeCode.toUpperCase())) {
+                errors.push(`ERR21: eBRC cannot be generated for purpose code ${dto.irmPurposeCode} as per DGFT guidelines (26-Mar-2024) in record ${recordNum}`);
+            }
+
             // Club ID validation (ERR12, ERR13)
             if (dto.clubId) {
                 if (clubIds.has(dto.clubId)) {
@@ -425,15 +431,15 @@ function validatePayload(payload) {
                 const day = parseInt(dateStr.substring(0, 2));
                 const month = parseInt(dateStr.substring(2, 4));
                 const year = parseInt(dateStr.substring(4, 8));
-                
+
                 if (month < 1 || month > 12 || day < 1 || day > 31) return false;
                 if (year < 1900 || year > 2100) return false;
-                
+
                 const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
                 if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) {
                     daysInMonth[1] = 29;
                 }
-                
+
                 return day <= daysInMonth[month - 1];
             }
 
@@ -452,6 +458,11 @@ function validatePayload(payload) {
             // Purpose code validation (ERR21)
             if (dto.irmPurposeCode && !VALID_PURPOSE_CODES.includes(dto.irmPurposeCode.toUpperCase())) {
                 errors.push(`ERR21: Invalid purpose code in record ${recordNum}`);
+            }
+
+            // Block P0101 and P0108 as per latest DGFT guidelines
+            if (dto.irmPurposeCode && ['P0101', 'P0108'].includes(dto.irmPurposeCode.toUpperCase())) {
+                errors.push(`ERR21: eBRC cannot be generated for purpose code ${dto.irmPurposeCode} as per DGFT guidelines (26-Mar-2024) in record ${recordNum}`);
             }
 
             // Currency code validation
@@ -540,7 +551,7 @@ export const fileEbrcService = async (payload) => {
             "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
-            "x-api-key": apiKey, 
+            "x-api-key": apiKey,
             "messageID": messageID
         };
 
@@ -585,7 +596,7 @@ export const fileEbrcService = async (payload) => {
 
             const status = error.response.status.toString();
             const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
-            
+
             return {
                 success: false,
                 error: errorMsg,
@@ -608,7 +619,7 @@ export const getEbrcStatus = async (messageId) => {
     try {
         console.log("=== GET eBRC STATUS ===");
         console.log("Message ID:", messageId);
-        
+
         // Get fresh access token
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
@@ -633,81 +644,17 @@ export const getEbrcStatus = async (messageId) => {
 
     } catch (error) {
         console.error("Status check failed:", error.message);
-        
+
         if (error.response) {
             const status = error.response.status.toString();
             const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
             throw new Error(errorMsg);
         }
-        
+
         throw error;
     }
 };
 
-// SAMPLE PAYLOAD: Example payload structure as per DGFT specification
-export const createSamplePayload = () => {
-    return {
-        "iecNumber": "1234567890",
-        "requestId": `MSG_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
-        "recordResCount": 1,
-        "uploadType": "IRM",
-        "decalarationFlag": "Y",
-        "ebrcBulkGenDtos": [
-            {
-                "serialNo": 1,
-                "clubId": "CLUB001",
-                "irmIfscCode": "SBIN0000123", // 11 characters as required
-                "irmAdCode": "AD001",
-                "irmNumber": "IRM123456789",
-                "irmDt": "15092024", // ddMMYYYY format
-                "irmFCC": "USD", // Valid currency code
-                "irmPurposeCode": "P0101", // Valid purpose code
-                "irmRemitAmtFCC": 10000.00,
-                "irmAvailableAmtFCC": 10000.00,
-                "paymentDate": "15092024", // ddMMYYYY format
-                "shippingBillNo": "SB12345", // Max 7 digits
-                "sbCumInvoiceDate": "15092024", // ddMMYYYY format
-                "invoiceNumber": "INV001",
-                "portCode": "INMAA1", // Max 6 characters
-                "billNo": "BILL001", // Max 20 characters
-                "isVostro": "N", // Y or N
-                "vostroType": "SVRA", // SVRA or NVRA
-                "thirdPartyExport": "N", // Y or N
-                "ormAmount": 10000.00,
-                "remarks": "Sample eBRC generation"
-            }
-        ]
-    };
-};
 
-// CONFIGURATION VALIDATOR: Check environment variables
-export const validateConfiguration = () => {
-    const requiredEnvVars = [
-        'CLIENT_SECRET',
-        'DGFT_SANDBOX_URL',
-        'X_API_KEY', 
-        'CLIENT_ID',
-        'USER_PRIVATE_KEY',
-        'DGFT_PUBLIC_KEY',
-        'ACCESS_TOKEN_URL'
-    ];
 
-    const missing = requiredEnvVars.filter(varName => !process.env[varName]);
-    
-    if (missing.length > 0) {
-        throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-    }
-
-    // Validate key formats
-    if (!dgftPublicKey?.includes('BEGIN CERTIFICATE') && !dgftPublicKey?.includes('BEGIN PUBLIC KEY')) {
-        console.warn("DGFT_PUBLIC_KEY format may be incorrect");
-    }
-
-    if (!userPrivateKey?.includes('BEGIN PRIVATE KEY') && !userPrivateKey?.includes('BEGIN RSA PRIVATE KEY')) {
-        console.warn("USER_PRIVATE_KEY format may be incorrect");
-    }
-
-    console.log("✅ Configuration validation passed");
-    return true;
-};
 
