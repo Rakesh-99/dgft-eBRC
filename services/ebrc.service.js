@@ -393,6 +393,8 @@ function validatePayload(payload) {
         // Validate each record
         const serialNumbers = new Set();
         const clubIds = new Set();
+        let totalIrmMappedAmount = 0;
+        const invoicePurposeMapping = new Map();
 
         payload.ebrcBulkGenDtos.forEach((dto, index) => {
             const recordNum = index + 1;
@@ -404,12 +406,6 @@ function validatePayload(payload) {
                 errors.push(`ERR11: Duplicate serial number in same message - record ${recordNum}`);
             } else {
                 serialNumbers.add(dto.serialNo);
-            }
-
-
-            // Block P0101 and P0108 as per latest DGFT guidelines
-            if (dto.irmPurposeCode && ['P0101', 'P0108'].includes(dto.irmPurposeCode.toUpperCase())) {
-                errors.push(`ERR21: eBRC cannot be generated for purpose code ${dto.irmPurposeCode} as per DGFT guidelines (26-Mar-2024) in record ${recordNum}`);
             }
 
             // Club ID validation (ERR12, ERR13)
@@ -500,7 +496,35 @@ function validatePayload(payload) {
             if (dto.irmRemitAmtFCC && (isNaN(dto.irmRemitAmtFCC) || dto.irmRemitAmtFCC <= 0)) {
                 errors.push(`ERR35: Invalid ORM amount specified in record ${recordNum}`);
             }
+
+            // Amount calculation for ERR38
+            if (dto.irmRemitAmtFCC && !isNaN(dto.irmRemitAmtFCC)) {
+                totalIrmMappedAmount += parseFloat(dto.irmRemitAmtFCC);
+            }
+
+            //  Invoice and purpose code mapping validation for ERR39
+            if (dto.sbCumInvoiceNo && dto.irmPurposeCode) {
+                const key = `${dto.sbCumInvoiceNo}_${dto.irmPurposeCode}`;
+                if (invoicePurposeMapping.has(key)) {
+                    const existingRecord = invoicePurposeMapping.get(key);
+                    if (existingRecord.irmRemitAmtFCC !== dto.irmRemitAmtFCC) {
+                        errors.push(`ERR39: Invoice and purpose code mapping is not correct in record ${recordNum}`);
+                    }
+                } else {
+                    invoicePurposeMapping.set(key, {
+                        irmRemitAmtFCC: dto.irmRemitAmtFCC,
+                        recordNum: recordNum
+                    });
+                }
+            }
         });
+
+        // Validate total IRM mapped amount (ERR38)
+        // This validation would need the available amount from IRM system
+        // For now, we'll add a placeholder that can be enhanced with actual IRM data
+        if (payload.totalAvailableAmount && totalIrmMappedAmount > payload.totalAvailableAmount) {
+            errors.push('ERR38: Total IRM mapped is more than available amount. Please check the calculation');
+        }
     }
 
     if (errors.length > 0) {
