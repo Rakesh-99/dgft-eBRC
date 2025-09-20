@@ -115,6 +115,44 @@ export const checkCurrentIP = async () => {
     }
 };
 
+export const validateEnvironmentSetup = () => {
+    console.log("=== ENVIRONMENT VALIDATION ===");
+
+    const requiredEnvVars = {
+        'CLIENT_SECRET': clientSecret,
+        'DGFT_SANDBOX_URL': baseUrl,
+        'X_API_KEY': apiKey,
+        'CLIENT_ID': clientId,
+        'USER_PRIVATE_KEY': userPrivateKey,
+        'DGFT_PUBLIC_KEY': dgftPublicKey,
+        'ACCESS_TOKEN_URL': accessTokenBaseUrl
+    };
+
+    let hasErrors = false;
+
+    Object.entries(requiredEnvVars).forEach(([key, value]) => {
+        if (!value) {
+            console.error(`❌ ${key} is missing or empty`);
+            hasErrors = true;
+        } else {
+            console.log(`✅ ${key} is configured (length: ${value.length})`);
+        }
+    });
+
+    // Validate key formats
+    if (userPrivateKey) {
+        const hasPrivateKeyHeaders = userPrivateKey.includes('-----BEGIN') && userPrivateKey.includes('-----END');
+        console.log(`Private Key Format: ${hasPrivateKeyHeaders ? '✅ Valid' : '❌ Missing headers'}`);
+    }
+
+    if (dgftPublicKey) {
+        const hasPublicKeyHeaders = dgftPublicKey.includes('-----BEGIN') && dgftPublicKey.includes('-----END');
+        console.log(`DGFT Public Key Format: ${hasPublicKeyHeaders ? '✅ Valid' : '❌ Missing headers'}`);
+    }
+
+    return !hasErrors;
+};
+
 // PBKDF2 password encryption with dynamic salt
 export const getSandboxToken = async () => {
     try {
@@ -359,6 +397,9 @@ function decryptResponse(responseBody, secretPlain, _requestSalt) {
 
 //  Payload validation
 function validatePayload(payload) {
+
+    console.log("Validating payload ............");
+
     const errors = [];
 
     // Required fields validation
@@ -542,6 +583,12 @@ export const fileEbrcService = async (payload) => {
         console.log("Sandbox URL:", baseUrl);
         console.log("Timestamp:", new Date().toISOString());
 
+        // Validate environment first
+        const envValid = validateEnvironmentSetup();
+        if (!envValid) {
+            throw new Error("Environment validation failed");
+        }
+
         // Check current IP for troubleshooting
         const systemIP = await checkCurrentIP();
 
@@ -554,12 +601,21 @@ export const fileEbrcService = async (payload) => {
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
         console.log("Access token obtained successfully");
+        console.log("Token length:", accessToken?.length || 0);
 
         // Steps 1-5: Encryption and signature process
         console.log("Starting encryption and signature process...");
         const encryptionResult = encryptPayload(payload);
+        console.log("Encryption completed successfully");
+        console.log("Encrypted data length:", encryptionResult.encodedData.length);
+
         const digitalSignature = createDigitalSignature(encryptionResult.payloadBase64);
+        console.log("Digital signature created successfully");
+        console.log("Signature length:", digitalSignature.length);
+
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+        console.log("AES key encrypted successfully");
+        console.log("Encrypted AES key length:", encryptedAESKey.length);
 
         // Step 6: Prepare request as per specification
         const requestBody = {
@@ -580,20 +636,62 @@ export const fileEbrcService = async (payload) => {
             "messageID": messageID
         };
 
+        console.log("=== REQUEST HEADERS VALIDATION ===");
+        Object.entries(headers).forEach(([key, value]) => {
+            if (!value) {
+                console.error(`❌ Header ${key} is missing or empty`);
+            } else {
+                console.log(`✅ ${key}: ${key === 'accessToken' || key === 'secretVal' ? '[REDACTED]' : value} (length: ${value.length})`);
+            }
+        });
+
         console.log("=== SENDING REQUEST TO DGFT ===");
         console.log("Endpoint:", `${baseUrl}/pushIRMToGenEBRC`);
         console.log("Message ID:", messageID);
+        console.log("Request body keys:", Object.keys(requestBody));
         console.log("Request body size:", JSON.stringify(requestBody).length, "bytes");
 
-        // Make API call with 30-second timeout
+        // Debug request details
+        console.log("=== REQUEST DETAILS ===");
+        console.log("Method: POST");
+        console.log("URL:", `${baseUrl}/pushIRMToGenEBRC`);
+        console.log("Headers count:", Object.keys(headers).length);
+        console.log("Payload structure:", {
+            data: `${encryptionResult.encodedData.substring(0, 50)}...`,
+            sign: `${digitalSignature.substring(0, 50)}...`
+        });
+
+        // Make API call with detailed error handling
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
             headers,
-            timeout: 30000
+            timeout: 30000,
+            validateStatus: function (status) {
+                return status < 500; // Don't throw on 4xx errors, we want to see the response
+            }
         });
 
         console.log("=== RESPONSE RECEIVED ===");
         console.log("HTTP Status:", response.status);
-        console.log("Response received from DGFT");
+        console.log("Response Headers:", JSON.stringify(response.headers, null, 2));
+        console.log("Response Data:", JSON.stringify(response.data, null, 2));
+
+        if (response.status !== 200) {
+            console.error("=== NON-200 RESPONSE ANALYSIS ===");
+            console.error("Status Code:", response.status);
+            console.error("Status Text:", response.statusText);
+
+            const status = response.status.toString();
+            const errorMsg = ERROR_CODES[status] || response.data?.message || `HTTP ${response.status}`;
+
+            if (response.status === 403) {
+                console.error("=== 403 FORBIDDEN ANALYSIS ===");
+                console.error("Possible causes:");
+                console.error("1. IP not whitelisted:", systemIP.ip);
+                console.error("2. Invalid client_id:", clientId);
+                console.error("3. Invalid x-api-key");
+            }
+            throw new Error(`eBRC filing failed: ${errorMsg}`);
+        }
 
         // Step 7: Decrypt and verify response
         console.log("Decrypting and verifying response...");
@@ -611,13 +709,14 @@ export const fileEbrcService = async (payload) => {
 
     } catch (error) {
         console.error("=== eBRC FILING ERROR ===");
-        console.error("Error:", error.message);
+        console.error("Error type:", error.constructor.name);
+        console.error("Error message:", error.message);
         console.error("Timestamp:", new Date().toISOString());
 
         if (error.response) {
             console.error("HTTP Status:", error.response.status);
-            console.error("Response Headers:", error.response.headers);
-            console.error("Response Data:", error.response.data);
+            console.error("Response Headers:", JSON.stringify(error.response.headers, null, 2));
+            console.error("Response Data:", JSON.stringify(error.response.data, null, 2));
 
             const status = error.response.status.toString();
             const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
@@ -627,8 +726,13 @@ export const fileEbrcService = async (payload) => {
                 error: errorMsg,
                 httpStatus: error.response.status,
                 timestamp: new Date().toISOString(),
-                details: error.response.data
+                details: error.response.data,
+                headers: error.response.headers
             };
+        }
+
+        if (error.code) {
+            console.error("Network error code:", error.code);
         }
 
         return {
