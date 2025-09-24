@@ -228,7 +228,7 @@ function generateAESKey(secretKey, saltString) {
     return aesKey;
 }
 
-// Complete encryption process - CORRECTED
+//  encryption process 
 function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
@@ -241,12 +241,11 @@ function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
         console.log("Step 2: JSON message Base64 encoded");
 
-        // Step 3: Generate 32 characters plain text dynamic key
-        const secretPlain = generate32CharKeyboardSecret();
-        console.log("Step 3: 32-character secret key generated:", secretPlain);
+        // === HARDCODED SECRET KEY AND SALT FOR DGFT DEBUGGING ===
+        const secretPlain = "dgft-192.168.186.381718185454806";
+        const saltString = "dgft-192.168.186.381718185454845";
+        console.log("Step 3: Using DGFT sample secret key and salt");
 
-        // Step 4: Generate 32 character salt string and encrypt
-        const saltString = generate32CharKeyboardSecret();
         const aesKey = generateAESKey(secretPlain, saltString);
 
         // Generate random 12-byte IV
@@ -260,8 +259,7 @@ function encryptPayload(payload) {
         const authTag = cipher.getAuthTag();
         console.log("Step 4: Message encrypted using AES-256-GCM");
 
-        // CORRECT: Combine as per Java spec: IV (12) + salt (32) + encrypted message
-        // AuthTag is included in the encrypted data as part of GCM
+        //  Combine  IV (12) + salt (32) + encrypted message
         const saltBytes = Buffer.from(saltString, 'utf8');
         const encryptedData = Buffer.concat([encryptedPart, encryptedFinal, authTag]);
         const combinedData = Buffer.concat([iv, saltBytes, encryptedData]);
@@ -270,7 +268,7 @@ function encryptPayload(payload) {
 
         return {
             secretPlain,
-            encodedData,        // This will be used for signing and in request body
+            encodedData,
             payloadBase64,
             saltString,
             aesKey,
@@ -621,7 +619,7 @@ export const fileEbrcService = async (payload) => {
 
         // CORRECT: Prepare request as per specification
         const requestBody = {
-            data: encryptionResult.encodedData,  // Fixed typo: was ededData
+            data: encryptionResult.encodedData,
             sign: digitalSignature
         };
 
