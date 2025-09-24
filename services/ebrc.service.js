@@ -245,15 +245,15 @@ function encryptPayload(payload) {
         const salt = crypto.randomBytes(32); // 32 bytes salt
         const aesKey = generateAESKey(secretPlain, salt);
 
-        // IV: First 12 bytes of cryptographic key as per Algorithm Specification
-        const iv = aesKey.slice(0, 12);
-        console.log("IV: First 12 bytes of AES key extracted");
+        // CHANGE THIS: Use random IV instead of AES key slice
+        const iv = crypto.randomBytes(12); // Generate random 12-byte IV
+        console.log("IV: Random 12 bytes generated");
 
-        // Encrypt using AES-256-GCM with No Padding as per spec
+        // Rest of your encryption logic remains the same
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         let encrypted = cipher.update(payloadBase64, 'utf8');
         encrypted = Buffer.concat([encrypted, cipher.final()]);
-        const authTag = cipher.getAuthTag(); // GCM Tag Length: 16 Bytes
+        const authTag = cipher.getAuthTag();
         console.log("Step 4: Message encrypted using AES-256-GCM");
 
         // Step 5: Combine IV + salt + encrypted message (as per spec format)
