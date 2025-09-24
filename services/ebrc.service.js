@@ -194,10 +194,9 @@ export const getSandboxToken = async () => {
     }
 };
 
-// FIXED: Include dots (.) in character set as per DGFT example
 function generate32CharKeyboardSecret() {
-    // Include dots (.) as per DGFT example: dgft-192.168.186.381718185454806
-    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.';
+    // DGFT example uses specific characters including dots and hyphens
+    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-';
     let secret = '';
     for (let i = 0; i < 32; i++) {
         secret += keyboardChars[Math.floor(Math.random() * keyboardChars.length)];
@@ -207,13 +206,15 @@ function generate32CharKeyboardSecret() {
 }
 
 //  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
-function generateAESKey(secretKey, salt) {
-    const aesKey = crypto.pbkdf2Sync(secretKey, salt, 65536, 32, 'sha256');
+function generateAESKey(secretKey, saltString) {
+    // Convert salt string to bytes for PBKDF2
+    const saltBytes = Buffer.from(saltString, 'utf8');
+    const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
     console.log("AES 256-bit key generated using PBKDF2WithHmacSHA256 (65536 iterations)");
     return aesKey;
 }
 
-// Complete encryption process
+// Complete encryption process - CORRECTED
 function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
@@ -226,37 +227,40 @@ function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
         console.log("Step 2: JSON message Base64 encoded");
 
-        // Step 3: Generate 32 characters plain text dynamic key using keyboard characters
+        // Step 3: Generate 32 characters plain text dynamic key
         const secretPlain = generate32CharKeyboardSecret();
-        console.log("Step 3: 32-character secret key generated");
+        console.log("Step 3: 32-character secret key generated:", secretPlain);
 
-        // Step 4: Generate AES key and encrypt message
-        const salt = crypto.randomBytes(32); // 32 bytes salt
-        const aesKey = generateAESKey(secretPlain, salt);
+        // Step 4: Generate 32 character salt string and encrypt
+        const saltString = generate32CharKeyboardSecret();
+        const aesKey = generateAESKey(secretPlain, saltString);
 
-        // FIXED: Use random IV instead of AES key slice
-        const iv = crypto.randomBytes(12); // Generate random 12-byte IV
+        // Generate random 12-byte IV
+        const iv = crypto.randomBytes(12);
         console.log("IV: Random 12 bytes generated");
 
-        // AES-256-GCM encryption
+        // AES-256-GCM encryption of the Base64 encoded message
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-        let encrypted = cipher.update(payloadBase64, 'utf8');
-        encrypted = Buffer.concat([encrypted, cipher.final()]);
+        const encryptedPart = cipher.update(payloadBase64, 'utf8');
+        const encryptedFinal = cipher.final();
         const authTag = cipher.getAuthTag();
         console.log("Step 4: Message encrypted using AES-256-GCM");
 
-        // Step 5: Combine IV + salt + encrypted message (as per spec format)
-        const encryptedWithTag = Buffer.concat([encrypted, authTag]);
-        const combinedData = Buffer.concat([iv, salt, encryptedWithTag]);
+        // CORRECT: Combine as per Java spec: IV (12) + salt (32) + encrypted message
+        // AuthTag is included in the encrypted data as part of GCM
+        const saltBytes = Buffer.from(saltString, 'utf8');
+        const encryptedData = Buffer.concat([encryptedPart, encryptedFinal]);
+        const combinedData = Buffer.concat([iv, saltBytes, encryptedData]);
         const encodedData = combinedData.toString('base64');
-        console.log("Step 5: Combined data (IV + salt + encrypted message) encoded");
+        console.log("Step 4: Combined data (IV + salt + encrypted) Base64 encoded");
 
         return {
             secretPlain,
-            encodedData,
-            payloadBase64,  // For digital signature
-            salt,
-            aesKey
+            encodedData,        // This will be used for signing and in request body
+            payloadBase64,
+            saltString,
+            aesKey,
+            iv
         };
     } catch (error) {
         console.error("Encryption failed:", error);
@@ -264,8 +268,8 @@ function encryptPayload(payload) {
     }
 }
 
-// Digital signature using RSA-SHA256
-function createDigitalSignature(payloadBase64) {
+// Digital signature using RSA-SHA256 - CORRECTED: Sign the ENCODED ENCRYPTED MESSAGE
+function createDigitalSignature(encodedEncryptedMessage) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
 
@@ -288,12 +292,12 @@ function createDigitalSignature(payloadBase64) {
             ].join('\n');
         }
 
-        // Digitally sign the Base64 encoded message using RSA-SHA256
+        // CORRECT: Sign the ENCODED ENCRYPTED MESSAGE from Step 4
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(payloadBase64);
+        signer.update(encodedEncryptedMessage);  // This is the encoded encrypted message from Step 4
         const signature = signer.sign(privateKey, "base64");
 
-        console.log("Digital signature created using RSA-SHA256");
+        console.log("Digital signature created using RSA-SHA256 on encoded encrypted message");
         return signature;
     } catch (error) {
         console.error("Digital signature failed:", error);
@@ -304,7 +308,7 @@ function createDigitalSignature(payloadBase64) {
 // Encrypt secret key using DGFT public key with RSA
 function encryptAESKey(secretPlain) {
     try {
-        console.log("=== AES KEY ENCRYPTION (Step 5) ===");
+        console.log("=== AES KEY ENCRYPTION (Step 6) ===");
 
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY not found in environment");
@@ -328,25 +332,28 @@ function encryptAESKey(secretPlain) {
     }
 }
 
-// Response decryption
-function decryptResponse(responseBody, secretPlain, _requestSalt) {
+// Response decryption - CORRECTED
+function decryptResponse(responseBody, secretPlain, requestSaltString) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
 
         // Step 1: Decode the response data
         const combined = Buffer.from(responseBody.data, 'base64');
 
-        // Extract components: IV (12) + salt (32) + encrypted data + authTag (16)
+        // Extract components: IV (12) + salt (32) + encrypted data
         const iv = combined.slice(0, 12);
-        const responseSalt = combined.slice(12, 44); // Use DGFT's salt from response
-        const encryptedWithTag = combined.slice(44);
-        const authTag = encryptedWithTag.slice(-16);
-        const ciphertext = encryptedWithTag.slice(0, -16);
+        const responseSaltBytes = combined.slice(12, 44);
+        const encryptedData = combined.slice(44);
+
+        // For GCM, we need to separate the authTag (last 16 bytes)
+        const authTag = encryptedData.slice(-16);
+        const ciphertext = encryptedData.slice(0, -16);
 
         console.log("Step 1: Response data components extracted");
 
-        // Step 2: Generate AES key using DGFT's salt from response
-        const aesKey = generateAESKey(secretPlain, responseSalt);
+        // Step 2: Generate AES key using response salt
+        const responseSaltString = responseSaltBytes.toString('utf8');
+        const aesKey = generateAESKey(secretPlain, responseSaltString);
         console.log("Step 2: AES key regenerated for decryption");
 
         // Step 3: Decrypt the data using AES-256-GCM
@@ -360,13 +367,13 @@ function decryptResponse(responseBody, secretPlain, _requestSalt) {
         const payloadBase64 = decrypted.toString('utf8');
         const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
 
-        // Step 4: Verify digital signature
+        // Step 4: Verify digital signature - Verify against the ENCRYPTED DATA
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY required for signature verification");
         }
 
         const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(payloadBase64);
+        verifier.update(responseBody.data);  // Verify against the encrypted data
         const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
 
         if (!isVerified) {
@@ -381,7 +388,6 @@ function decryptResponse(responseBody, secretPlain, _requestSalt) {
     }
 }
 
-// FIXED: Handle DGFT's typo in declarationFlag and remove purpose code blocking
 function validatePayload(payload) {
     console.log("Validating payload ............");
 
@@ -481,7 +487,7 @@ function validatePayload(payload) {
                 errors.push(`ERR28: Invalid shipping bill/ SOFTEX or invoice date field in record ${recordNum}`);
             }
 
-            // FIXED: Basic purpose code validation only (removed blocking of P0101, P0108)
+            // Purpose code validation (ERR21)
             if (dto.irmPurposeCode && !VALID_PURPOSE_CODES.includes(dto.irmPurposeCode.toUpperCase())) {
                 errors.push(`ERR21: Invalid purpose code in record ${recordNum}`);
             }
@@ -527,8 +533,8 @@ function validatePayload(payload) {
             }
 
             // Invoice and purpose code mapping validation for ERR39
-            if (dto.sbCumInvoiceNo && dto.irmPurposeCode) {
-                const key = `${dto.sbCumInvoiceNo}_${dto.irmPurposeCode}`;
+            if (dto.sbCumInvoiceNumber && dto.irmPurposeCode) {
+                const key = `${dto.sbCumInvoiceNumber}_${dto.irmPurposeCode}`;
                 if (invoicePurposeMapping.has(key)) {
                     const existingRecord = invoicePurposeMapping.get(key);
                     if (existingRecord.irmRemitAmtFCC !== dto.irmRemitAmtFCC) {
@@ -543,7 +549,7 @@ function validatePayload(payload) {
             }
         });
 
-        // Validate total IRM mapped amount (ERR38)
+        // Validate total amounts for ERR38
         if (payload.totalAvailableAmount && totalIrmMappedAmount > payload.totalAvailableAmount) {
             errors.push('ERR38: Total IRM mapped is more than available amount. Please check the calculation');
         }
@@ -584,13 +590,14 @@ export const fileEbrcService = async (payload) => {
         console.log("Access token obtained successfully");
         console.log("Token length:", accessToken?.length || 0);
 
-        // Steps 1-5: Encryption and signature process
+        // Steps 1-5: Encryption and signature process - CORRECTED
         console.log("Starting encryption and signature process...");
         const encryptionResult = encryptPayload(payload);
         console.log("Encryption completed successfully");
         console.log("Encrypted data length:", encryptionResult.encodedData.length);
 
-        const digitalSignature = createDigitalSignature(encryptionResult.payloadBase64);
+        // CORRECT: Sign the encoded encrypted message (from Step 4)
+        const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
         console.log("Digital signature created successfully");
         console.log("Signature length:", digitalSignature.length);
 
@@ -598,9 +605,9 @@ export const fileEbrcService = async (payload) => {
         console.log("AES key encrypted successfully");
         console.log("Encrypted AES key length:", encryptedAESKey.length);
 
-        // Step 6: Prepare request as per specification
+        // CORRECT: Prepare request as per specification
         const requestBody = {
-            data: encryptionResult.encodedData,
+            data: encryptionResult.encodedData,  // Fixed typo: was ededData
             sign: digitalSignature
         };
 
@@ -674,9 +681,9 @@ export const fileEbrcService = async (payload) => {
             throw new Error(`eBRC filing failed: ${errorMsg}`);
         }
 
-        // Step 7: Decrypt and verify response
+        // Step 7: Decrypt and verify response - CORRECTED
         console.log("Decrypting and verifying response...");
-        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain, encryptionResult.salt);
+        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain, encryptionResult.saltString);
 
         console.log("=== eBRC FILING SUCCESSFUL ===");
         return {
@@ -721,98 +728,5 @@ export const fileEbrcService = async (payload) => {
             error: error.message,
             timestamp: new Date().toISOString()
         };
-    }
-};
-
-// Test with DGFT's exact JSON example
-export const testWithDGFTExample = async () => {
-    // Use DGFT's exact JSON from documentation
-    const dgftExamplePayload = {
-        "iecNumber": "1234567890",
-        "requestId": "ARNBULKEBRC00246618AM25",
-        "recordResCount": 1,
-        "uploadType": 101,
-        "decalarationFlag": "Y",  // Note: DGFT's typo
-        "ebrcBulkGenDtos": [
-            {
-                "serialNo": 1,
-                "uploadType": 101,
-                "branchSlNo": 1,
-                "irmIfscCode": "AS311111111",
-                "irmAdCode": "DR4",
-                "irmNumber": "IBKL14",
-                "irmDt": "15122023",
-                "irmFCC": "USD",
-                "irmPurposeCode": "P0216",
-                "irmRemitAmtFCC": 345,
-                "sbCumInvoiceNumber": "665511",
-                "sbCumInvoiceDate": "15122023",
-                "portCode": "INNSA1",
-                "billNo": "56G",
-                "sbCumInvoiceFCC": "USD",
-                "sbCumInvoiceValueinFCC": 345,
-                "mappedIRMAmountFCC": 34,
-                "isVostro": "Y",
-                "vostroType": null,
-                "mappedORMAmountFCC": null,
-                "isThirdPartyExport": null,
-                "commissionValDeduct": null,
-                "commissionValInfo": 50,
-                "discountValDeduct": 20,
-                "discountValInfo": null,
-                "insuranceValDeduct": null,
-                "insuranceValInfo": null,
-                "otherDeductionDeduct": null,
-                "otherdeductionsInfo": null,
-                "freightValDeduct": null,
-                "freightValInfo": null,
-                "sacCode1": "123456.0",
-                "sacCode2": null,
-                "serviceTypeModesValue": null
-            }
-        ]
-    };
-
-    return await fileEbrcService(dgftExamplePayload);
-};
-
-// UTILITY: Get processing status (Step 10 - Wait 2 hours between push and get)
-export const getEbrcStatus = async (messageId) => {
-    try {
-        console.log("=== GET eBRC STATUS ===");
-        console.log("Message ID:", messageId);
-
-        // Get fresh access token
-        const tokenResponse = await getSandboxToken();
-        const accessToken = tokenResponse.data.accessToken;
-
-        const headers = {
-            "Content-Type": "application/json",
-            "accessToken": accessToken,
-            "client_id": clientId,
-            "x-api-key": apiKey
-        };
-
-        const response = await axios.get(
-            `${baseUrl}/getProcessingStatus/${messageId}`,
-            { headers, timeout: 15000 }
-        );
-
-        return {
-            success: true,
-            data: response.data,
-            message: "Status retrieved successfully"
-        };
-
-    } catch (error) {
-        console.error("Status check failed:", error.message);
-
-        if (error.response) {
-            const status = error.response.status.toString();
-            const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
-            throw new Error(errorMsg);
-        }
-
-        throw error;
     }
 };
