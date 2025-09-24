@@ -153,22 +153,13 @@ export const validateEnvironmentSetup = () => {
     return !hasErrors;
 };
 
-// PBKDF2 password encryption with dynamic salt
+// FIXED: Direct client_secret authentication (no PBKDF2)
 export const getSandboxToken = async () => {
     try {
         console.log("=== TOKEN GENERATION (Step 3) ===");
 
-        // Generate 32 bytes dynamic salt as per spec
-        const salt = crypto.randomBytes(32);
-        console.log("32 bytes dynamic salt generated");
-
-        // PBKDF2 encryption with iteration count 65536 and key length 256
-        const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
-        console.log("PBKDF2 encryption completed (65536 iterations, SHA256)");
-
-        // String representation of dynamic salt byte appended with encrypted hash byte
-        const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
-        console.log("Final secret prepared: salt + hash encoded in base64");
+        // Use direct client_secret as per DGFT spec
+        console.log("Using direct client_secret for token generation");
 
         console.log("=== TOKEN REQUEST ===");
         console.log("Client ID:", clientId);
@@ -178,7 +169,7 @@ export const getSandboxToken = async () => {
             `${accessTokenBaseUrl}/getAccessToken`,
             {
                 client_id: clientId,
-                client_secret: finalSecret,
+                client_secret: clientSecret,  // Direct secret, no PBKDF2
             },
             {
                 headers: {
@@ -203,11 +194,10 @@ export const getSandboxToken = async () => {
     }
 };
 
-//  Generate 32 character plain text dynamic key using keyboard characters
+// FIXED: Include dots (.) in character set as per DGFT example
 function generate32CharKeyboardSecret() {
-    // As per spec: "API consumer shall use keyboard characters to generate the secret key"
-    // Allowed characters per spec: a-zA-z / - 0-9
-    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-';
+    // Include dots (.) as per DGFT example: dgft-192.168.186.381718185454806
+    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-.';
     let secret = '';
     for (let i = 0; i < 32; i++) {
         secret += keyboardChars[Math.floor(Math.random() * keyboardChars.length)];
@@ -216,15 +206,14 @@ function generate32CharKeyboardSecret() {
     return secret;
 }
 
-//  AES key generation by salting secret key with 32 bytes using SHA256
+//  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
 function generateAESKey(secretKey, salt) {
     const aesKey = crypto.pbkdf2Sync(secretKey, salt, 65536, 32, 'sha256');
     console.log("AES 256-bit key generated using PBKDF2WithHmacSHA256 (65536 iterations)");
     return aesKey;
 }
 
-
-// - Complete encryption process
+// Complete encryption process
 function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
@@ -245,11 +234,11 @@ function encryptPayload(payload) {
         const salt = crypto.randomBytes(32); // 32 bytes salt
         const aesKey = generateAESKey(secretPlain, salt);
 
-        // CHANGE THIS: Use random IV instead of AES key slice
+        // FIXED: Use random IV instead of AES key slice
         const iv = crypto.randomBytes(12); // Generate random 12-byte IV
         console.log("IV: Random 12 bytes generated");
 
-        // Rest of your encryption logic remains the same
+        // AES-256-GCM encryption
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         let encrypted = cipher.update(payloadBase64, 'utf8');
         encrypted = Buffer.concat([encrypted, cipher.final()]);
@@ -275,7 +264,7 @@ function encryptPayload(payload) {
     }
 }
 
-//  Digital signature using RSA-SHA256
+// Digital signature using RSA-SHA256
 function createDigitalSignature(payloadBase64) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
@@ -312,7 +301,7 @@ function createDigitalSignature(payloadBase64) {
     }
 }
 
-//  Encrypt secret key using DGFT public key with RSA
+// Encrypt secret key using DGFT public key with RSA
 function encryptAESKey(secretPlain) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 5) ===");
@@ -339,7 +328,7 @@ function encryptAESKey(secretPlain) {
     }
 }
 
-//  Response decryption
+// Response decryption
 function decryptResponse(responseBody, secretPlain, _requestSalt) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
@@ -392,16 +381,15 @@ function decryptResponse(responseBody, secretPlain, _requestSalt) {
     }
 }
 
-//  Payload validation
+// FIXED: Handle DGFT's typo in declarationFlag and remove purpose code blocking
 function validatePayload(payload) {
-
     console.log("Validating payload ............");
 
     const errors = [];
 
     // Required fields validation
     const requiredFields = [
-        'iecNumber', 'requestId', 'recordResCount', 'uploadType', 'declarationFlag', 'ebrcBulkGenDtos'
+        'iecNumber', 'requestId', 'recordResCount', 'uploadType', 'ebrcBulkGenDtos'
     ];
 
     requiredFields.forEach(field => {
@@ -410,10 +398,13 @@ function validatePayload(payload) {
         }
     });
 
+    // FIXED: Handle DGFT's typo - accept both correct and incorrect spellings
+    const declarationFlag = payload.declarationFlag || payload.decalarationFlag;
+
     // Declaration flag validation (ERR36, ERR37)
-    if (!payload.declarationFlag) {
+    if (!declarationFlag) {
         errors.push('ERR36: Declaration flag is missing');
-    } else if (!['Y', 'N'].includes(payload.declarationFlag.toUpperCase())) {
+    } else if (!['Y', 'N'].includes(declarationFlag.toUpperCase())) {
         errors.push('ERR37: Invalid values specified for declaration flag');
     }
 
@@ -490,14 +481,9 @@ function validatePayload(payload) {
                 errors.push(`ERR28: Invalid shipping bill/ SOFTEX or invoice date field in record ${recordNum}`);
             }
 
-            // Purpose code validation (ERR21)
+            // FIXED: Basic purpose code validation only (removed blocking of P0101, P0108)
             if (dto.irmPurposeCode && !VALID_PURPOSE_CODES.includes(dto.irmPurposeCode.toUpperCase())) {
                 errors.push(`ERR21: Invalid purpose code in record ${recordNum}`);
-            }
-
-            // Block P0101 and P0108 as per latest DGFT guidelines
-            if (dto.irmPurposeCode && ['P0101', 'P0108'].includes(dto.irmPurposeCode.toUpperCase())) {
-                errors.push(`ERR21: eBRC cannot be generated for purpose code ${dto.irmPurposeCode} as per DGFT guidelines (26-Mar-2024) in record ${recordNum}`);
             }
 
             // Currency code validation
@@ -540,7 +526,7 @@ function validatePayload(payload) {
                 totalIrmMappedAmount += parseFloat(dto.irmRemitAmtFCC);
             }
 
-            //  Invoice and purpose code mapping validation for ERR39
+            // Invoice and purpose code mapping validation for ERR39
             if (dto.sbCumInvoiceNo && dto.irmPurposeCode) {
                 const key = `${dto.sbCumInvoiceNo}_${dto.irmPurposeCode}`;
                 if (invoicePurposeMapping.has(key)) {
@@ -558,8 +544,6 @@ function validatePayload(payload) {
         });
 
         // Validate total IRM mapped amount (ERR38)
-        // This validation would need the available amount from IRM system
-        // For now, we'll add a placeholder that can be enhanced with actual IRM data
         if (payload.totalAvailableAmount && totalIrmMappedAmount > payload.totalAvailableAmount) {
             errors.push('ERR38: Total IRM mapped is more than available amount. Please check the calculation');
         }
@@ -572,7 +556,7 @@ function validatePayload(payload) {
     console.log("Payload validation successful");
 }
 
-// File eBRC data :
+// File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
         console.log("=== eBRC FILING REQUEST STARTED ===");
@@ -740,6 +724,58 @@ export const fileEbrcService = async (payload) => {
     }
 };
 
+// Test with DGFT's exact JSON example
+export const testWithDGFTExample = async () => {
+    // Use DGFT's exact JSON from documentation
+    const dgftExamplePayload = {
+        "iecNumber": "1234567890",
+        "requestId": "ARNBULKEBRC00246618AM25",
+        "recordResCount": 1,
+        "uploadType": 101,
+        "decalarationFlag": "Y",  // Note: DGFT's typo
+        "ebrcBulkGenDtos": [
+            {
+                "serialNo": 1,
+                "uploadType": 101,
+                "branchSlNo": 1,
+                "irmIfscCode": "AS311111111",
+                "irmAdCode": "DR4",
+                "irmNumber": "IBKL14",
+                "irmDt": "15122023",
+                "irmFCC": "USD",
+                "irmPurposeCode": "P0216",
+                "irmRemitAmtFCC": 345,
+                "sbCumInvoiceNumber": "665511",
+                "sbCumInvoiceDate": "15122023",
+                "portCode": "INNSA1",
+                "billNo": "56G",
+                "sbCumInvoiceFCC": "USD",
+                "sbCumInvoiceValueinFCC": 345,
+                "mappedIRMAmountFCC": 34,
+                "isVostro": "Y",
+                "vostroType": null,
+                "mappedORMAmountFCC": null,
+                "isThirdPartyExport": null,
+                "commissionValDeduct": null,
+                "commissionValInfo": 50,
+                "discountValDeduct": 20,
+                "discountValInfo": null,
+                "insuranceValDeduct": null,
+                "insuranceValInfo": null,
+                "otherDeductionDeduct": null,
+                "otherdeductionsInfo": null,
+                "freightValDeduct": null,
+                "freightValInfo": null,
+                "sacCode1": "123456.0",
+                "sacCode2": null,
+                "serviceTypeModesValue": null
+            }
+        ]
+    };
+
+    return await fileEbrcService(dgftExamplePayload);
+};
+
 // UTILITY: Get processing status (Step 10 - Wait 2 hours between push and get)
 export const getEbrcStatus = async (messageId) => {
     try {
@@ -780,7 +816,3 @@ export const getEbrcStatus = async (messageId) => {
         throw error;
     }
 };
-
-
-
-
