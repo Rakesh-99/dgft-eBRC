@@ -156,20 +156,23 @@ export const validateEnvironmentSetup = () => {
 // FIXED: Direct client_secret authentication (no PBKDF2)
 export const getSandboxToken = async () => {
     try {
-        console.log("=== TOKEN GENERATION (Step 3) ===");
+        console.log("=== TOKEN GENERATION (Step 3) - DGFT Method ===");
 
-        // Use direct client_secret as per DGFT spec
-        console.log("Using direct client_secret for token generation");
+        // Generate salt and encrypt client_secret as per DGFT specification
+        const salt = crypto.randomBytes(32);
+        const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
+        const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
-        console.log("=== TOKEN REQUEST ===");
         console.log("Client ID:", clientId);
         console.log("Endpoint:", `${accessTokenBaseUrl}/getAccessToken`);
+        console.log("Salt length:", salt.length);
+        console.log("Final secret length:", finalSecret.length);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
             {
                 client_id: clientId,
-                client_secret: clientSecret,  // Direct secret, no PBKDF2
+                client_secret: finalSecret,  // Encrypted secret as per DGFT spec
             },
             {
                 headers: {
@@ -187,9 +190,20 @@ export const getSandboxToken = async () => {
         console.error("=== TOKEN ERROR ===");
         console.error("Status:", error.response?.status);
         console.error("Response:", error.response?.data);
+        console.error("Request body:", {
+            client_id: clientId,
+            client_secret: "[ENCRYPTED]"
+        });
 
         const status = error.response?.status?.toString();
-        const errorMsg = ERROR_CODES[status] || error.message;
+        const errorMsg = ERROR_CODES[status] || error.response?.data?.message || error.message;
+
+        // Check for IP issues
+        if (status === "403") {
+            const systemIP = await checkCurrentIP();
+            console.error("403 Error - IP may need whitelisting:", systemIP.ip);
+        }
+
         throw new Error(`Authentication failed: ${errorMsg}`);
     }
 };
