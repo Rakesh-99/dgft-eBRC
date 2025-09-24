@@ -263,7 +263,7 @@ function encryptPayload(payload) {
         // CORRECT: Combine as per Java spec: IV (12) + salt (32) + encrypted message
         // AuthTag is included in the encrypted data as part of GCM
         const saltBytes = Buffer.from(saltString, 'utf8');
-        const encryptedData = Buffer.concat([encryptedPart, encryptedFinal]);
+        const encryptedData = Buffer.concat([encryptedPart, encryptedFinal, authTag]);
         const combinedData = Buffer.concat([iv, saltBytes, encryptedData]);
         const encodedData = combinedData.toString('base64');
         console.log("Step 4: Combined data (IV + salt + encrypted) Base64 encoded");
