@@ -243,10 +243,17 @@ async function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
         console.log("Step 2: JSON message Base64 encoded");
 
-        //  Step 3: Using DGFT  secret key and salt
+  
         const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
-        const aesKey = generateAESKey(secretPlain, saltString);
-        console.log("Step 3: Using DGFT sample secret key and salt");
+
+        // Ensure both are exactly 32 chars
+        if (secretPlain.length !== 32 || saltString.length !== 32) {
+            throw new Error("Secret key and salt must be exactly 32 characters");
+        }
+
+        // Step 4: Generate AES key using PBKDF2
+        const aesKey = crypto.pbkdf2Sync(secretPlain, Buffer.from(saltString, 'utf8'), 65536, 32, 'sha256');
+        console.log("Step 3: AES 256-bit key generated using PBKDF2WithHmacSHA256 (65536 iterations)");
 
         // Generate random 12-byte IV
         const iv = crypto.randomBytes(12);
@@ -254,17 +261,21 @@ async function encryptPayload(payload) {
 
         // AES-256-GCM encryption of the Base64 encoded message
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-        const encryptedPart = cipher.update(payloadBase64, 'utf8');
-        const encryptedFinal = cipher.final();
+        const encrypted = Buffer.concat([
+            cipher.update(payloadBase64, 'utf8'),
+            cipher.final()
+        ]);
         const authTag = cipher.getAuthTag();
-        console.log("Step 4: Message encrypted using AES-256-GCM");
 
-        //  Combine  IV (12) + salt (32) + encrypted message
-        const saltBytes = Buffer.from(saltString, 'utf8');
-        const encryptedData = Buffer.concat([encryptedPart, encryptedFinal, authTag]);
-        const combinedData = Buffer.concat([iv, saltBytes, encryptedData]);
+        // Combine IV (12) + salt (32) + encrypted data + authTag (16)
+        const encryptedData = Buffer.concat([encrypted, authTag]);
+        const combinedData = Buffer.concat([
+            iv, // 12 bytes
+            Buffer.from(saltString, 'utf8'), // 32 bytes
+            encryptedData // encrypted + authTag
+        ]);
         const encodedData = combinedData.toString('base64');
-        console.log("Step 4: Combined data (IV + salt + encrypted) Base64 encoded");
+        console.log("Step 4: Combined data (IV + salt + encrypted + authTag) Base64 encoded");
 
         return {
             secretPlain,
