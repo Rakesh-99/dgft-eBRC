@@ -525,35 +525,42 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted' })
         const accessToken = tokenResponse.data.accessToken;
 
         const encryptionResult = await encryptPayload(payload);
-
         const toSign = opts.signMode === 'payloadBase64'
-            ? encryptionResult.payloadBase64   // Fallback if DGFT expects Step-2 base64
-            : encryptionResult.encodedData;    // Default (Java snippet)
+            ? encryptionResult.payloadBase64
+            : encryptionResult.encodedData;
 
         const digitalSignature = createDigitalSignature(toSign);
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
-
-        const requestBody = {
-            data: encryptionResult.encodedData,
-            sign: digitalSignature
-        };
 
         const messageID = payload.requestId || crypto.randomUUID().slice(0, 50);
 
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
+            "Authorization": `Bearer ${accessToken}`, // added (test)
             "client_id": clientId,
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
             "messageID": messageID
         };
 
+        // Debug (remove in prod)
+        console.log("=== OUTBOUND HEADERS ===");
+        Object.entries(headers).forEach(([k, v]) => {
+            console.log(`${k}: length=${(v || '').length}`);
+        });
+
+        const requestBody = { data: encryptionResult.encodedData, sign: digitalSignature };
+
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
             headers,
             timeout: 30000,
             validateStatus: s => s < 500
         });
+
+        if (response.status === 403) {
+            console.error("403 body:", response.data);
+        }
 
         if (response.status !== 200) {
             const status = response.status.toString();
@@ -562,25 +569,12 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted' })
         }
 
         const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain);
-
-        return {
-            success: true,
-            messageID,
-            data: decryptedData,
-            timestamp: new Date().toISOString(),
-            systemIP: systemIP.ip
-        };
+        return { success: true, messageID, data: decryptedData, timestamp: new Date().toISOString(), systemIP: systemIP.ip };
     } catch (error) {
         if (error.response) {
             const status = error.response.status.toString();
             const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
-            return {
-                success: false,
-                error: errorMsg,
-                httpStatus: error.response.status,
-                timestamp: new Date().toISOString(),
-                details: error.response.data
-            };
+            return { success: false, error: errorMsg, httpStatus: error.response.status, timestamp: new Date().toISOString(), details: error.response.data };
         }
         return { success: false, error: error.message, timestamp: new Date().toISOString() };
     }
