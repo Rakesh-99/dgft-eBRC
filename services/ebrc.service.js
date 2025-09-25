@@ -220,7 +220,7 @@ function generateAESKey(secretKey, saltString) {
 }
 
 //  encryption process 
-function encryptPayload(payload) {
+async function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
 
@@ -233,10 +233,10 @@ function encryptPayload(payload) {
         console.log("Step 2: JSON message Base64 encoded");
 
         //  Step 3: Using DGFT  secret key and salt
-        const secretPlain = generateDynamic32CharSecret();
-        const saltString = generateDynamic32CharSecret();
+        const secretPlain = await generateDynamic32CharSecret();
+        const saltString = await generateDynamic32CharSecret();
         const aesKey = generateAESKey(secretPlain, saltString);
-        console.log("Step 3: Using DGFT samle secret key and salt");
+        console.log("Step 3: Using DGFT sample secret key and salt");
 
         // Generate random 12-byte IV
         const iv = crypto.randomBytes(12);
@@ -567,7 +567,7 @@ export const fileEbrcService = async (payload) => {
         const accessToken = tokenResponse.data.accessToken;
 
         // Steps 1-5: Encryption and signature process 
-        const encryptionResult = encryptPayload(payload);
+        const encryptionResult = await encryptPayload(payload);
 
         //  Sign the encoded encrypted message (from Step 4)
         const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
