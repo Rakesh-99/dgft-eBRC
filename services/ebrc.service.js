@@ -142,7 +142,6 @@ export const validateEnvironmentSetup = () => {
         }
     });
 
-    // Validate key formats
     if (userPrivateKey) {
         const hasPrivateKeyHeaders = userPrivateKey.includes('-----BEGIN') && userPrivateKey.includes('-----END');
         console.log(`Private Key Format: ${hasPrivateKeyHeaders ? ' Valid' : ' Missing headers'}`);
@@ -156,10 +155,9 @@ export const validateEnvironmentSetup = () => {
     return !hasErrors;
 };
 
-// Access token generation : 
+// Access token generation
 export const getSandboxToken = async () => {
     try {
-        // Generate salt and encrypt client_secret as per DGFT specification
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
@@ -168,24 +166,21 @@ export const getSandboxToken = async () => {
             `${accessTokenBaseUrl}/getAccessToken`,
             {
                 client_id: clientId,
-                client_secret: finalSecret,  // Encrypted secret as per DGFT spec
+                client_secret: finalSecret,
             },
             {
                 headers: {
                     "Content-Type": "application/json",
                     "x-api-key": apiKey,
                 },
-                // timeout: 15000
             }
         );
         console.log("Token generated successfully ");
-
         return response;
     } catch (error) {
         const status = error.response?.status?.toString();
         const errorMsg = ERROR_CODES[status] || error.response?.data?.message || error.message;
 
-        // Check for IP issues
         if (status === "403") {
             const systemIP = await checkCurrentIP();
             console.error("403 Error - IP may need whitelisting:", systemIP.ip);
@@ -199,38 +194,34 @@ async function generateDynamic32CharSecretPair(appName = "dgft-eBRC") {
     try {
         const ipInfo = await checkCurrentIP();
         ip = ipInfo.ip || ip;
-    } catch { /* ignore */ }
+    } catch { }
 
-    const rand = crypto.randomBytes(6).toString('hex'); // 12 chars
-    let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`; // may exceed
+    const rand = crypto.randomBytes(6).toString('hex');
+    let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`;
     if (base.length < 32) base = base.padEnd(32, '0');
     if (base.length > 32) base = base.slice(0, 32);
 
-    // Independent 32-char salt (keyboard chars)
     const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._@#';
     let salt = Array.from({ length: 32 }, () => charset[Math.floor(Math.random() * charset.length)]).join('');
     return { secretPlain: base, saltString: salt };
 }
 
-//  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
 function generateAESKey(secretKey, saltString) {
-    // Convert salt string to bytes for PBKDF2
     const saltBytes = Buffer.from(saltString, 'utf8');
     const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
     console.log("AES 256-bit key generated using PBKDF2WithHmacSHA256 (65536 iterations)");
     return aesKey;
 }
 
-//  encryption process 
 async function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
-        const payloadJson = JSON.stringify(payload);       // Step 1
-        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64'); // Step 2
+        const payloadJson = JSON.stringify(payload);
+        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
 
-        const { secretPlain, saltString } = await generateDynamic32CharSecretPair(); // Step 3
+        const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
         const aesKey = generateAESKey(secretPlain, saltString);
-        const iv = crypto.randomBytes(12); // Step 4
+        const iv = crypto.randomBytes(12);
 
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         const encryptedPart = cipher.update(payloadBase64, 'utf8');
@@ -253,24 +244,17 @@ async function encryptPayload(payload) {
     }
 }
 
-// Digital signature using RSA-SHA256. Sign the ENCODED ENCRYPTED MESSAGE
 function createDigitalSignature(encodedEncryptedMessage) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
-
         if (!userPrivateKey) {
             throw new Error("USER_PRIVATE_KEY not found in environment");
         }
-
         let privateKey = userPrivateKey.trim();
-
-        //  Sign the ENCODED ENCRYPTED MESSAGE from Step 4
-
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(encodedEncryptedMessage, 'utf8');  // This is the encoded encrypted message from Step 4
+        signer.update(encodedEncryptedMessage, 'utf8');
         signer.end();
         const signature = signer.sign(privateKey, "base64");
-
         console.log("Digital signature created using RSA-SHA256 on encoded encrypted message");
         return signature;
     } catch (error) {
@@ -279,16 +263,12 @@ function createDigitalSignature(encodedEncryptedMessage) {
     }
 }
 
-// Encrypt secret key using DGFT public key with RSA
 function encryptAESKey(secretPlain) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 6) ===");
-
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY not found in environment");
         }
-
-        // RSA encryption with OAEP and SHA256 padding as per Algorithm Specification
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
@@ -306,7 +286,6 @@ function encryptAESKey(secretPlain) {
     }
 }
 
-// Response decryption
 function decryptResponse(responseBody, secretPlain) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
@@ -343,10 +322,7 @@ function decryptResponse(responseBody, secretPlain) {
 
 function validatePayload(payload) {
     console.log("Validating payload ............");
-
     const errors = [];
-
-    // Required fields validation
     const requiredFields = [
         'iecNumber', 'requestId', 'recordResCount', 'uploadType', 'ebrcBulkGenDtos'
     ];
@@ -357,28 +333,23 @@ function validatePayload(payload) {
         }
     });
 
-    // FIXED: Handle DGFT's typo - accept both correct and incorrect spellings
     const declarationFlag = payload.declarationFlag || payload.decalarationFlag;
 
-    // Declaration flag validation (ERR36, ERR37)
     if (!declarationFlag) {
         errors.push('ERR36: Declaration flag is missing');
     } else if (!['Y', 'N'].includes(declarationFlag.toUpperCase())) {
         errors.push('ERR37: Invalid values specified for declaration flag');
     }
 
-    // Message ID length validation (ERR07)
     if (payload.requestId && payload.requestId.length > 50) {
         errors.push('ERR07: Invalid messageId, its length shall not be greater than 50');
     }
 
-    // Record count validation (ERR08)
     if (payload.ebrcBulkGenDtos && Array.isArray(payload.ebrcBulkGenDtos)) {
         if (payload.recordResCount !== payload.ebrcBulkGenDtos.length) {
             errors.push('ERR08: Count mismatches. Total number of record in header and data shared not match');
         }
 
-        // Validate each record
         const serialNumbers = new Set();
         const clubIds = new Set();
         let totalIrmMappedAmount = 0;
@@ -387,7 +358,6 @@ function validatePayload(payload) {
         payload.ebrcBulkGenDtos.forEach((dto, index) => {
             const recordNum = index + 1;
 
-            // Serial number validation (ERR10, ERR11)
             if (!dto.serialNo) {
                 errors.push(`ERR10: Invalid serial number in record ${recordNum}`);
             } else if (serialNumbers.has(dto.serialNo)) {
@@ -396,7 +366,6 @@ function validatePayload(payload) {
                 serialNumbers.add(dto.serialNo);
             }
 
-            // Club ID validation (ERR12, ERR13)
             if (dto.clubId) {
                 if (clubIds.has(dto.clubId)) {
                     errors.push(`ERR13: Duplicate clubID in same request message - record ${recordNum}`);
@@ -405,26 +374,19 @@ function validatePayload(payload) {
                 }
             }
 
-            // IFSC code validation (ERR14)
             if (dto.irmIfscCode && dto.irmIfscCode.length !== 11) {
                 errors.push(`ERR14: Invalid IFSC code, its length shall be 11 digit in record ${recordNum}`);
             }
 
-            // Date format validation (ERR17, ERR24, ERR28)
             function isValidDateFormat(dateStr) {
                 if (!/^\d{8}$/.test(dateStr)) return false;
                 const day = parseInt(dateStr.substring(0, 2));
                 const month = parseInt(dateStr.substring(2, 4));
                 const year = parseInt(dateStr.substring(4, 8));
-
                 if (month < 1 || month > 12 || day < 1 || day > 31) return false;
                 if (year < 1900 || year > 2100) return false;
-
                 const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-                if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) {
-                    daysInMonth[1] = 29;
-                }
-
+                if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) daysInMonth[1] = 29;
                 return day <= daysInMonth[month - 1];
             }
 
@@ -440,52 +402,42 @@ function validatePayload(payload) {
                 errors.push(`ERR28: Invalid shipping bill/ SOFTEX or invoice date field in record ${recordNum}`);
             }
 
-            // Purpose code validation (ERR21)
             if (dto.irmPurposeCode && !VALID_PURPOSE_CODES.includes(dto.irmPurposeCode.toUpperCase())) {
                 errors.push(`ERR21: Invalid purpose code in record ${recordNum}`);
             }
 
-            // Currency code validation
             if (dto.irmFCC && !VALID_CURRENCY_CODES.includes(dto.irmFCC.toUpperCase())) {
                 errors.push(`Invalid currency code ${dto.irmFCC} in record ${recordNum}`);
             }
 
-            // Shipping bill number validation (ERR25)
             if (dto.shippingBillNo && dto.shippingBillNo.toString().length > 7) {
                 errors.push(`ERR25: Invalid shipping bill number. It cannot be greater than 7 digit in record ${recordNum}`);
             }
 
-            // Port code validation (ERR29)
             if (dto.portCode && dto.portCode.toString().length > 6) {
                 errors.push(`ERR29: Invalid port code mentioned. Port code cannot be greater than 6 digit in length in record ${recordNum}`);
             }
 
-            // Bill number validation (ERR31)
             if (dto.billNo && dto.billNo.toString().length > 20) {
                 errors.push(`ERR31: Invalid billNo its values cannot be greater than 20 digit length in record ${recordNum}`);
             }
 
-            // Vostro flag validation (ERR32)
             if (dto.isVostro && !['Y', 'N'].includes(dto.isVostro.toUpperCase())) {
                 errors.push(`ERR32: Invalid values for isVostro flag. Allowed values are Y/N in record ${recordNum}`);
             }
 
-            // Vostro type validation (ERR33)
             if (dto.vostroType && !['SVRA', 'NVRA'].includes(dto.vostroType.toUpperCase())) {
                 errors.push(`ERR33: Invalid vostro type specified. Allowed values are SVRA/NVRA in record ${recordNum}`);
             }
 
-            // Amount validation (ERR35)
             if (dto.irmRemitAmtFCC && (isNaN(dto.irmRemitAmtFCC) || dto.irmRemitAmtFCC <= 0)) {
                 errors.push(`ERR35: Invalid ORM amount specified in record ${recordNum}`);
             }
 
-            // Amount calculation for ERR38
             if (dto.irmRemitAmtFCC && !isNaN(dto.irmRemitAmtFCC)) {
                 totalIrmMappedAmount += parseFloat(dto.irmRemitAmtFCC);
             }
 
-            // Invoice and purpose code mapping validation for ERR39
             if (dto.sbCumInvoiceNumber && dto.irmPurposeCode) {
                 const key = `${dto.sbCumInvoiceNumber}_${dto.irmPurposeCode}`;
                 if (invoicePurposeMapping.has(key)) {
@@ -502,7 +454,6 @@ function validatePayload(payload) {
             }
         });
 
-        // Validate total amounts for ERR38
         if (payload.totalAvailableAmount && totalIrmMappedAmount > payload.totalAvailableAmount) {
             errors.push('ERR38: Total IRM mapped is more than available amount. Please check the calculation');
         }
@@ -534,7 +485,6 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', a
         console.log("x-api-key length:", apiKey?.length);
         console.log("accessToken length:", accessToken?.length);
 
-        // Optional: detect hidden chars
         for (const [i, c] of [...clientId].entries()) {
             if (c.charCodeAt(0) < 32) console.log(`DEBUG clientId hidden char at ${i}: ${c.charCodeAt(0)}`);
         }
@@ -552,7 +502,7 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', a
 
         const headers = {
             "Content-Type": "application/json",
-            "client_id": clientId,          // primary (snake_case)
+            "client_id": clientId,
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
             "messageID": messageID
@@ -567,7 +517,6 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', a
             headers["Authorization"] = `Bearer ${accessToken}`;
         }
 
-        // (Optional) add camelCase variant only for diagnostic round:
         if (opts.includeCamelCase) headers["clientId"] = clientId;
 
         console.log("=== OUTBOUND HEADERS (names:length) ===");
