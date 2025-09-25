@@ -520,7 +520,7 @@ function short(str) {
     return str.slice(0, 16) + '...' + str.slice(-8);
 }
 
-export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', headerMode: 'both' }) => {
+export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', authMode: 'accessToken' }) => {
     try {
         const systemIP = await checkCurrentIP();
         validatePayload(payload);
@@ -530,10 +530,14 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', h
 
         console.log("=== AUTH CONTEXT ===");
         console.log("baseUrl:", baseUrl);
-        console.log("clientId:", clientId);
+        console.log("clientId(raw):", JSON.stringify(clientId));
         console.log("x-api-key length:", apiKey?.length);
         console.log("accessToken length:", accessToken?.length);
-        console.log("accessToken preview:", short(accessToken));
+
+        // Optional: detect hidden chars
+        for (const [i, c] of [...clientId].entries()) {
+            if (c.charCodeAt(0) < 32) console.log(`DEBUG clientId hidden char at ${i}: ${c.charCodeAt(0)}`);
+        }
 
         const encryptionResult = await encryptPayload(payload);
         const toSign = opts.signMode === 'payloadBase64'
@@ -546,40 +550,40 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', h
 
         const messageID = payload.requestId || crypto.randomUUID().slice(0, 50);
 
-        // Try different header sets
         const headers = {
             "Content-Type": "application/json",
-            "clientId": clientId,              // alt casing
+            "client_id": clientId,          // primary (snake_case)
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
             "messageID": messageID
         };
 
-        if (opts.headerMode === 'accessToken' || opts.headerMode === 'both') {
+        if (opts.authMode === 'accessToken') {
             headers["accessToken"] = accessToken;
-        }
-        if (opts.headerMode === 'authorization' || opts.headerMode === 'both') {
+        } else if (opts.authMode === 'authorization') {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+        } else if (opts.authMode === 'both') {
+            headers["accessToken"] = accessToken;
             headers["Authorization"] = `Bearer ${accessToken}`;
         }
 
-        console.log("=== OUTBOUND HEADERS (names & lengths) ===");
-        Object.entries(headers).forEach(([k, v]) => console.log(`${k}: ${typeof v === 'string' ? v.length : 'n/a'}`));
+        // (Optional) add camelCase variant only for diagnostic round:
+        if (opts.includeCamelCase) headers["clientId"] = clientId;
+
+        console.log("=== OUTBOUND HEADERS (names:length) ===");
+        Object.entries(headers).forEach(([k, v]) => console.log(`${k}:${(v || '').length}`));
 
         const requestBody = { data: encryptionResult.encodedData, sign: digitalSignature };
-
         console.log("POST URL:", `${baseUrl}/pushIRMToGenEBRC`);
+
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
             headers,
             timeout: 30000,
             validateStatus: s => s < 500
         });
 
-        if (response.status === 403) {
-            console.error("403 response headers:", response.headers);
-            console.error("403 raw body:", response.data);
-        }
-
         if (response.status !== 200) {
+            console.error(`${response.status} body:`, response.data);
             const status = response.status.toString();
             const errorMsg = ERROR_CODES[status] || response.data?.message || `HTTP ${response.status}`;
             throw new Error(`eBRC filing failed: ${errorMsg}`);
