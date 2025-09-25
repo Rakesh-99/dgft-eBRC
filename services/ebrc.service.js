@@ -191,33 +191,39 @@ export const getSandboxToken = async () => {
     }
 };
 
-async function generateDynamic32CharSecretPair(appName = "dgft") {
+function formatIPForKey(ip) {
+    // Take first 14 chars of IP, pad with '0' if shorter
+    return (ip + '00000000000000').substring(0, 14);
+}
+
+async function generateDynamic32CharSecretPair() {
+    const appName = "dgft";
     let ip = "127.0.0.1";
     try {
         const ipInfo = await checkCurrentIP();
         ip = ipInfo.ip || ip;
     } catch { }
 
-    const ipStr = ip;
+    const ipPart = formatIPForKey(ip);
+    const numPart = Date.now().toString().padEnd(13, '0').substring(0, 13);
+    const secretPlain = `${appName}-${ipPart}${numPart}`.substring(0, 32);
 
-    const prefix = `${appName}-${ipStr}`;
-    const numberLength = 32 - prefix.length;
-    // Use timestamp, but pad or trim to fit
-    let number = Date.now().toString();
-    if (number.length < numberLength) {
-        number = number.padEnd(numberLength, '0');
-    } else if (number.length > numberLength) {
-        number = number.slice(0, numberLength);
-    }
-    const secretPlain = `${prefix}${number}`;
     // Salt: increment last digit (if digit), else replace last char with '1'
     let saltString;
-    if (/\d$/.test(secretPlain)) {
-        let lastDigit = parseInt(secretPlain.slice(-1));
-        saltString = secretPlain.slice(0, -1) + ((lastDigit + 1) % 10);
+    const lastChar = secretPlain.charAt(31);
+    if (/\d/.test(lastChar)) {
+        saltString = secretPlain.slice(0, 31) + ((parseInt(lastChar) + 1) % 10);
     } else {
-        saltString = secretPlain.slice(0, -1) + '1';
+        saltString = secretPlain.slice(0, 31) + '1';
     }
+
+    if (secretPlain.length !== 32) {
+        throw new Error(`Secret key must be 32 chars, got ${secretPlain.length}: ${secretPlain}`);
+    }
+    if (saltString.length !== 32) {
+        throw new Error(`Salt must be 32 chars, got ${saltString.length}: ${saltString}`);
+    }
+
     return { secretPlain, saltString };
 }
 
@@ -243,7 +249,7 @@ async function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
         console.log("Step 2: JSON message Base64 encoded");
 
-  
+
         const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
 
         // Ensure both are exactly 32 chars
