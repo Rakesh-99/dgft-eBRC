@@ -156,8 +156,6 @@ export const validateEnvironmentSetup = () => {
 // Access token generation : 
 export const getSandboxToken = async () => {
     try {
-        console.log("=== TOKEN GENERATION (Step 3) - DGFT Method ===");
-
         // Generate salt and encrypt client_secret as per DGFT specification
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
@@ -174,9 +172,11 @@ export const getSandboxToken = async () => {
                     "Content-Type": "application/json",
                     "x-api-key": apiKey,
                 },
-                timeout: 15000
+                // timeout: 15000
             }
         );
+        console.log("Token generated successfully ");
+
         return response;
     } catch (error) {
         const status = error.response?.status?.toString();
@@ -547,44 +547,26 @@ function validatePayload(payload) {
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
-        console.log("=== eBRC FILING REQUEST STARTED ===");
-
-
-        // Validate environment first
-        const envValid = validateEnvironmentSetup();
-        if (!envValid) {
-            throw new Error("Environment validation failed");
-        }
 
         // Check current IP for troubleshooting
         const systemIP = await checkCurrentIP();
 
         // Validate payload against DGFT specifications
-        console.log("Validating payload against DGFT specifications...");
         validatePayload(payload);
 
         // Step 4: Get access token (valid for 5 minutes)
-        console.log("Obtaining access token...");
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
 
-
-        // Steps 1-5: Encryption and signature process - CORRECTED
-        console.log("Starting encryption and signature process...");
+        // Steps 1-5: Encryption and signature process 
         const encryptionResult = encryptPayload(payload);
-
-
 
         //  Sign the encoded encrypted message (from Step 4)
         const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
-        console.log("Digital signature created successfully");
-
-
+  
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
-        console.log("AES key encrypted successfully");
-
-
-        //  Prepare request as per specification
+      
+        //  request as per dgft
         const requestBody = {
             data: encryptionResult.encodedData,
             sign: digitalSignature
@@ -603,30 +585,6 @@ export const fileEbrcService = async (payload) => {
             "messageID": messageID
         };
 
-        console.log("=== REQUEST HEADERS VALIDATION ===");
-        Object.entries(headers).forEach(([key, value]) => {
-            if (!value) {
-                console.error(` Header ${key} is missing or empty`);
-            } else {
-                console.log(`${key}: ${key === 'accessToken' || key === 'secretVal' ? '[REDACTED]' : value} (length: ${value.length})`);
-            }
-        });
-
-        console.log("=== SENDING REQUEST TO DGFT ===");
-        console.log("Endpoint:", `${baseUrl}/pushIRMToGenEBRC`);
-        console.log("Message ID:", messageID);
-        console.log("Request body keys:", Object.keys(requestBody));
-        console.log("Request body size:", JSON.stringify(requestBody).length, "bytes");
-
-        // Debug request details
-        console.log("=== REQUEST DETAILS ===");
-        console.log("Method: POST");
-        console.log("URL:", `${baseUrl}/pushIRMToGenEBRC`);
-        console.log("Headers count:", Object.keys(headers).length);
-        console.log("Payload structure:", {
-            data: `${encryptionResult.encodedData.substring(0, 50)}...`,
-            sign: `${digitalSignature.substring(0, 50)}...`
-        });
 
         // Make API call with detailed error handling
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
@@ -638,11 +596,6 @@ export const fileEbrcService = async (payload) => {
                     return status < 500; // Don't throw on 4xx errors, we want to see the response
                 }
             });
-
-        console.log("=== RESPONSE RECEIVED ===");
-        console.log("HTTP Status:", response.status);
-        console.log("Response Headers:", JSON.stringify(response.headers, null, 2));
-        console.log("Response Data:", JSON.stringify(response.data, null, 2));
 
         if (response.status !== 200) {
             console.error("=== NON-200 RESPONSE ANALYSIS ===");
@@ -703,7 +656,6 @@ export const fileEbrcService = async (payload) => {
         if (error.code) {
             console.error("Network error code:", error.code);
         }
-
         return {
             success: false,
             error: error.message,
