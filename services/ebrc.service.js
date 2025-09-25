@@ -191,32 +191,34 @@ export const getSandboxToken = async () => {
     }
 };
 
-async function generateDynamic32CharSecretPair(appName = "dgft-eBRC") {
+async function generateDynamic32CharSecretPair(appName = "dgft") {
     let ip = "127.0.0.1";
     try {
         const ipInfo = await checkCurrentIP();
         ip = ipInfo.ip || ip;
     } catch { }
-    const rand = Date.now().toString();
-    let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`;
-    if (base.length < 32) {
-        base = base.padEnd(32, '0');
-    } else if (base.length > 32) {
-        base = base.slice(0, 32);
+
+    const ipStr = ip;
+
+    const prefix = `${appName}-${ipStr}`;
+    const numberLength = 32 - prefix.length;
+    // Use timestamp, but pad or trim to fit
+    let number = Date.now().toString();
+    if (number.length < numberLength) {
+        number = number.padEnd(numberLength, '0');
+    } else if (number.length > numberLength) {
+        number = number.slice(0, numberLength);
     }
+    const secretPlain = `${prefix}${number}`;
     // Salt: increment last digit (if digit), else replace last char with '1'
-    let salt;
-    if (/\d$/.test(base)) {
-        let lastDigit = parseInt(base.slice(-1));
-        salt = base.slice(0, -1) + ((lastDigit + 1) % 10);
+    let saltString;
+    if (/\d$/.test(secretPlain)) {
+        let lastDigit = parseInt(secretPlain.slice(-1));
+        saltString = secretPlain.slice(0, -1) + ((lastDigit + 1) % 10);
     } else {
-        salt = base.slice(0, -1) + '1';
+        saltString = secretPlain.slice(0, -1) + '1';
     }
-    // Ensure both are 32 chars
-    if (base.length !== 32 || salt.length !== 32) {
-        throw new Error('Secret key and salt must be 32 characters');
-    }
-    return { secretPlain: base, saltString: salt };
+    return { secretPlain, saltString };
 }
 
 //  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
