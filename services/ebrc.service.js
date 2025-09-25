@@ -515,14 +515,25 @@ function validatePayload(payload) {
     console.log("Payload validation successful");
 }
 
-// File eBRC data
-export const fileEbrcService = async (payload, opts = { signMode: 'encrypted' }) => {
+function short(str) {
+    if (!str) return '';
+    return str.slice(0, 16) + '...' + str.slice(-8);
+}
+
+export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', headerMode: 'both' }) => {
     try {
         const systemIP = await checkCurrentIP();
         validatePayload(payload);
 
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
+
+        console.log("=== AUTH CONTEXT ===");
+        console.log("baseUrl:", baseUrl);
+        console.log("clientId:", clientId);
+        console.log("x-api-key length:", apiKey?.length);
+        console.log("accessToken length:", accessToken?.length);
+        console.log("accessToken preview:", short(accessToken));
 
         const encryptionResult = await encryptPayload(payload);
         const toSign = opts.signMode === 'payloadBase64'
@@ -531,27 +542,32 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted' })
 
         const digitalSignature = createDigitalSignature(toSign);
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+        console.log("secretVal length:", encryptedAESKey.length);
 
         const messageID = payload.requestId || crypto.randomUUID().slice(0, 50);
 
+        // Try different header sets
         const headers = {
             "Content-Type": "application/json",
-            "accessToken": accessToken,
-            "Authorization": `Bearer ${accessToken}`, // added (test)
-            "client_id": clientId,
+            "clientId": clientId,              // alt casing
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
             "messageID": messageID
         };
 
-        // Debug (remove in prod)
-        console.log("=== OUTBOUND HEADERS ===");
-        Object.entries(headers).forEach(([k, v]) => {
-            console.log(`${k}: length=${(v || '').length}`);
-        });
+        if (opts.headerMode === 'accessToken' || opts.headerMode === 'both') {
+            headers["accessToken"] = accessToken;
+        }
+        if (opts.headerMode === 'authorization' || opts.headerMode === 'both') {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+        }
+
+        console.log("=== OUTBOUND HEADERS (names & lengths) ===");
+        Object.entries(headers).forEach(([k, v]) => console.log(`${k}: ${typeof v === 'string' ? v.length : 'n/a'}`));
 
         const requestBody = { data: encryptionResult.encodedData, sign: digitalSignature };
 
+        console.log("POST URL:", `${baseUrl}/pushIRMToGenEBRC`);
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
             headers,
             timeout: 30000,
@@ -559,7 +575,8 @@ export const fileEbrcService = async (payload, opts = { signMode: 'encrypted' })
         });
 
         if (response.status === 403) {
-            console.error("403 body:", response.data);
+            console.error("403 response headers:", response.headers);
+            console.error("403 raw body:", response.data);
         }
 
         if (response.status !== 200) {
