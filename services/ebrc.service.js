@@ -7,10 +7,7 @@ const clientSecret = process.env.CLIENT_SECRET;
 const baseUrl = process.env.DGFT_SANDBOX_URL;
 const apiKey = process.env.X_API_KEY;
 const clientId = process.env.CLIENT_ID;
-const userPrivateKey = process.env.USER_PRIVATE_KEY
-    ? process.env.USER_PRIVATE_KEY.replace(/\\n/g, '\n').trim()
-    : undefined;
-
+const userPrivateKey = process.env.USER_PRIVATE_KEY;
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY?.replace(/\\n/g, '\n');
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
@@ -142,6 +139,7 @@ export const validateEnvironmentSetup = () => {
         }
     });
 
+    // Validate key formats
     if (userPrivateKey) {
         const hasPrivateKeyHeaders = userPrivateKey.includes('-----BEGIN') && userPrivateKey.includes('-----END');
         console.log(`Private Key Format: ${hasPrivateKeyHeaders ? ' Valid' : ' Missing headers'}`);
@@ -155,9 +153,10 @@ export const validateEnvironmentSetup = () => {
     return !hasErrors;
 };
 
-// Access token generation
+// Access token generation : 
 export const getSandboxToken = async () => {
     try {
+        // Generate salt and encrypt client_secret as per DGFT specification
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
@@ -166,21 +165,24 @@ export const getSandboxToken = async () => {
             `${accessTokenBaseUrl}/getAccessToken`,
             {
                 client_id: clientId,
-                client_secret: finalSecret,
+                client_secret: finalSecret,  // Encrypted secret as per DGFT spec
             },
             {
                 headers: {
                     "Content-Type": "application/json",
                     "x-api-key": apiKey,
                 },
+                // timeout: 15000
             }
         );
         console.log("Token generated successfully ");
+
         return response;
     } catch (error) {
         const status = error.response?.status?.toString();
         const errorMsg = ERROR_CODES[status] || error.response?.data?.message || error.message;
 
+        // Check for IP issues
         if (status === "403") {
             const systemIP = await checkCurrentIP();
             console.error("403 Error - IP may need whitelisting:", systemIP.ip);
@@ -195,66 +197,99 @@ async function generateDynamic32CharSecretPair(appName = "dgft-eBRC") {
         const ipInfo = await checkCurrentIP();
         ip = ipInfo.ip || ip;
     } catch { }
-
-    const rand = crypto.randomBytes(6).toString('hex');
+    const rand = Date.now().toString();
     let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`;
-    if (base.length < 32) base = base.padEnd(32, '0');
-    if (base.length > 32) base = base.slice(0, 32);
-
-    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._@#';
-    let salt = Array.from({ length: 32 }, () => charset[Math.floor(Math.random() * charset.length)]).join('');
+    if (base.length < 32) {
+        base = base.padEnd(32, '0');
+    } else if (base.length > 32) {
+        base = base.slice(0, 32);
+    }
+    // Salt: increment last digit (if digit), else replace last char with '1'
+    let salt;
+    if (/\d$/.test(base)) {
+        salt = base.slice(0, -1) + ((parseInt(base.slice(-1)) + 1) % 10);
+    } else {
+        salt = base.slice(0, -1) + '1';
+    }
     return { secretPlain: base, saltString: salt };
 }
 
+//  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
 function generateAESKey(secretKey, saltString) {
+    // Convert salt string to bytes for PBKDF2
     const saltBytes = Buffer.from(saltString, 'utf8');
     const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
     console.log("AES 256-bit key generated using PBKDF2WithHmacSHA256 (65536 iterations)");
     return aesKey;
 }
 
+//  encryption process 
 async function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
-        const payloadJson = JSON.stringify(payload);
-        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
 
+        // Step 1: Create message in JSON format
+        const payloadJson = JSON.stringify(payload);
+        console.log("Step 1: JSON message created");
+
+        // Step 2: Encode the JSON message using Base64 encoding
+        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
+        console.log("Step 2: JSON message Base64 encoded");
+
+        //  Step 3: Using DGFT  secret key and salt
         const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
         const aesKey = generateAESKey(secretPlain, saltString);
-        const iv = crypto.randomBytes(12);
+        console.log("Step 3: Using DGFT sample secret key and salt");
 
+        // Generate random 12-byte IV
+        const iv = crypto.randomBytes(12);
+        console.log("IV: Random 12 bytes generated");
+
+        // AES-256-GCM encryption of the Base64 encoded message
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         const encryptedPart = cipher.update(payloadBase64, 'utf8');
         const encryptedFinal = cipher.final();
         const authTag = cipher.getAuthTag();
+        console.log("Step 4: Message encrypted using AES-256-GCM");
 
+        //  Combine  IV (12) + salt (32) + encrypted message
         const saltBytes = Buffer.from(saltString, 'utf8');
         const encryptedData = Buffer.concat([encryptedPart, encryptedFinal, authTag]);
         const combinedData = Buffer.concat([iv, saltBytes, encryptedData]);
         const encodedData = combinedData.toString('base64');
+        console.log("Step 4: Combined data (IV + salt + encrypted) Base64 encoded");
 
         return {
+            secretPlain,
             encodedData,
             payloadBase64,
-            secretPlain,
-            saltString
+            saltString,
+            aesKey,
+            iv
         };
     } catch (error) {
+        console.error("Encryption failed:", error);
         throw new Error(`Encryption failed: ${error.message}`);
     }
 }
 
+// Digital signature using RSA-SHA256. Sign the ENCODED ENCRYPTED MESSAGE
 function createDigitalSignature(encodedEncryptedMessage) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
+
         if (!userPrivateKey) {
             throw new Error("USER_PRIVATE_KEY not found in environment");
         }
+
         let privateKey = userPrivateKey.trim();
+
+        //  Sign the ENCODED ENCRYPTED MESSAGE from Step 4
+
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(encodedEncryptedMessage, 'utf8');
-        signer.end();
+        signer.update(encodedEncryptedMessage);  // This is the encoded encrypted message from Step 4
         const signature = signer.sign(privateKey, "base64");
+
         console.log("Digital signature created using RSA-SHA256 on encoded encrypted message");
         return signature;
     } catch (error) {
@@ -263,12 +298,16 @@ function createDigitalSignature(encodedEncryptedMessage) {
     }
 }
 
+// Encrypt secret key using DGFT public key with RSA
 function encryptAESKey(secretPlain) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 6) ===");
+
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY not found in environment");
         }
+
+        // RSA encryption with OAEP and SHA256 padding as per Algorithm Specification
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
@@ -286,43 +325,68 @@ function encryptAESKey(secretPlain) {
     }
 }
 
-function decryptResponse(responseBody, secretPlain) {
+// Response decryption
+function decryptResponse(responseBody, secretPlain, requestSaltString) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
+
+        // Step 1: Decode the response data
         const combined = Buffer.from(responseBody.data, 'base64');
+
+        // Extract components: IV (12) + salt (32) + encrypted data
         const iv = combined.slice(0, 12);
         const responseSaltBytes = combined.slice(12, 44);
-        const enc = combined.slice(44);
-        const authTag = enc.slice(-16);
-        const ciphertext = enc.slice(0, -16);
+        const encryptedData = combined.slice(44);
 
+        // For GCM, we need to separate the authTag (last 16 bytes)
+        const authTag = encryptedData.slice(-16);
+        const ciphertext = encryptedData.slice(0, -16);
+
+        console.log("Step 1: Response data components extracted");
+
+        // Step 2: Generate AES key using response salt
         const responseSaltString = responseSaltBytes.toString('utf8');
         const aesKey = generateAESKey(secretPlain, responseSaltString);
+        console.log("Step 2: AES key regenerated for decryption");
 
+        // Step 3: Decrypt the data using AES-256-GCM
         const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
         decipher.setAuthTag(authTag);
         let decrypted = decipher.update(ciphertext);
         decrypted = Buffer.concat([decrypted, decipher.final()]);
+        console.log("Step 3: Data decrypted using AES-256-GCM");
 
+        // The decrypted data should be Base64 encoded JSON
         const payloadBase64 = decrypted.toString('utf8');
         const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
 
-        if (!dgftPublicKey) throw new Error("DGFT_PUBLIC_KEY required");
+        // Step 4: Verify digital signature - Verify against the ENCRYPTED DATA
+        if (!dgftPublicKey) {
+            throw new Error("DGFT_PUBLIC_KEY required for signature verification");
+        }
+
         const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(responseBody.data);
-        verifier.end();
-        if (!verifier.verify(dgftPublicKey, responseBody.sign, 'base64')) {
+        verifier.update(responseBody.data);  // Verify against the encrypted data
+        const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
+
+        if (!isVerified) {
             throw new Error('Response digital signature verification failed');
         }
+        console.log("Step 4: Digital signature verified successfully");
+
         return JSON.parse(payloadJson);
-    } catch (e) {
-        throw new Error(`Response decryption failed: ${e.message}`);
+    } catch (error) {
+        console.error("Response decryption failed:", error);
+        throw new Error(`Response decryption failed: ${error.message}`);
     }
 }
 
 function validatePayload(payload) {
     console.log("Validating payload ............");
+
     const errors = [];
+
+    // Required fields validation
     const requiredFields = [
         'iecNumber', 'requestId', 'recordResCount', 'uploadType', 'ebrcBulkGenDtos'
     ];
@@ -333,23 +397,28 @@ function validatePayload(payload) {
         }
     });
 
+    // FIXED: Handle DGFT's typo - accept both correct and incorrect spellings
     const declarationFlag = payload.declarationFlag || payload.decalarationFlag;
 
+    // Declaration flag validation (ERR36, ERR37)
     if (!declarationFlag) {
         errors.push('ERR36: Declaration flag is missing');
     } else if (!['Y', 'N'].includes(declarationFlag.toUpperCase())) {
         errors.push('ERR37: Invalid values specified for declaration flag');
     }
 
+    // Message ID length validation (ERR07)
     if (payload.requestId && payload.requestId.length > 50) {
         errors.push('ERR07: Invalid messageId, its length shall not be greater than 50');
     }
 
+    // Record count validation (ERR08)
     if (payload.ebrcBulkGenDtos && Array.isArray(payload.ebrcBulkGenDtos)) {
         if (payload.recordResCount !== payload.ebrcBulkGenDtos.length) {
             errors.push('ERR08: Count mismatches. Total number of record in header and data shared not match');
         }
 
+        // Validate each record
         const serialNumbers = new Set();
         const clubIds = new Set();
         let totalIrmMappedAmount = 0;
@@ -358,6 +427,7 @@ function validatePayload(payload) {
         payload.ebrcBulkGenDtos.forEach((dto, index) => {
             const recordNum = index + 1;
 
+            // Serial number validation (ERR10, ERR11)
             if (!dto.serialNo) {
                 errors.push(`ERR10: Invalid serial number in record ${recordNum}`);
             } else if (serialNumbers.has(dto.serialNo)) {
@@ -366,6 +436,7 @@ function validatePayload(payload) {
                 serialNumbers.add(dto.serialNo);
             }
 
+            // Club ID validation (ERR12, ERR13)
             if (dto.clubId) {
                 if (clubIds.has(dto.clubId)) {
                     errors.push(`ERR13: Duplicate clubID in same request message - record ${recordNum}`);
@@ -374,19 +445,26 @@ function validatePayload(payload) {
                 }
             }
 
+            // IFSC code validation (ERR14)
             if (dto.irmIfscCode && dto.irmIfscCode.length !== 11) {
                 errors.push(`ERR14: Invalid IFSC code, its length shall be 11 digit in record ${recordNum}`);
             }
 
+            // Date format validation (ERR17, ERR24, ERR28)
             function isValidDateFormat(dateStr) {
                 if (!/^\d{8}$/.test(dateStr)) return false;
                 const day = parseInt(dateStr.substring(0, 2));
                 const month = parseInt(dateStr.substring(2, 4));
                 const year = parseInt(dateStr.substring(4, 8));
+
                 if (month < 1 || month > 12 || day < 1 || day > 31) return false;
                 if (year < 1900 || year > 2100) return false;
+
                 const daysInMonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-                if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) daysInMonth[1] = 29;
+                if (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)) {
+                    daysInMonth[1] = 29;
+                }
+
                 return day <= daysInMonth[month - 1];
             }
 
@@ -402,42 +480,52 @@ function validatePayload(payload) {
                 errors.push(`ERR28: Invalid shipping bill/ SOFTEX or invoice date field in record ${recordNum}`);
             }
 
+            // Purpose code validation (ERR21)
             if (dto.irmPurposeCode && !VALID_PURPOSE_CODES.includes(dto.irmPurposeCode.toUpperCase())) {
                 errors.push(`ERR21: Invalid purpose code in record ${recordNum}`);
             }
 
+            // Currency code validation
             if (dto.irmFCC && !VALID_CURRENCY_CODES.includes(dto.irmFCC.toUpperCase())) {
                 errors.push(`Invalid currency code ${dto.irmFCC} in record ${recordNum}`);
             }
 
+            // Shipping bill number validation (ERR25)
             if (dto.shippingBillNo && dto.shippingBillNo.toString().length > 7) {
                 errors.push(`ERR25: Invalid shipping bill number. It cannot be greater than 7 digit in record ${recordNum}`);
             }
 
+            // Port code validation (ERR29)
             if (dto.portCode && dto.portCode.toString().length > 6) {
                 errors.push(`ERR29: Invalid port code mentioned. Port code cannot be greater than 6 digit in length in record ${recordNum}`);
             }
 
+            // Bill number validation (ERR31)
             if (dto.billNo && dto.billNo.toString().length > 20) {
                 errors.push(`ERR31: Invalid billNo its values cannot be greater than 20 digit length in record ${recordNum}`);
             }
 
+            // Vostro flag validation (ERR32)
             if (dto.isVostro && !['Y', 'N'].includes(dto.isVostro.toUpperCase())) {
                 errors.push(`ERR32: Invalid values for isVostro flag. Allowed values are Y/N in record ${recordNum}`);
             }
 
+            // Vostro type validation (ERR33)
             if (dto.vostroType && !['SVRA', 'NVRA'].includes(dto.vostroType.toUpperCase())) {
                 errors.push(`ERR33: Invalid vostro type specified. Allowed values are SVRA/NVRA in record ${recordNum}`);
             }
 
+            // Amount validation (ERR35)
             if (dto.irmRemitAmtFCC && (isNaN(dto.irmRemitAmtFCC) || dto.irmRemitAmtFCC <= 0)) {
                 errors.push(`ERR35: Invalid ORM amount specified in record ${recordNum}`);
             }
 
+            // Amount calculation for ERR38
             if (dto.irmRemitAmtFCC && !isNaN(dto.irmRemitAmtFCC)) {
                 totalIrmMappedAmount += parseFloat(dto.irmRemitAmtFCC);
             }
 
+            // Invoice and purpose code mapping validation for ERR39
             if (dto.sbCumInvoiceNumber && dto.irmPurposeCode) {
                 const key = `${dto.sbCumInvoiceNumber}_${dto.irmPurposeCode}`;
                 if (invoicePurposeMapping.has(key)) {
@@ -454,6 +542,7 @@ function validatePayload(payload) {
             }
         });
 
+        // Validate total amounts for ERR38
         if (payload.totalAvailableAmount && totalIrmMappedAmount > payload.totalAvailableAmount) {
             errors.push('ERR38: Total IRM mapped is more than available amount. Please check the calculation');
         }
@@ -466,86 +555,122 @@ function validatePayload(payload) {
     console.log("Payload validation successful");
 }
 
-function short(str) {
-    if (!str) return '';
-    return str.slice(0, 16) + '...' + str.slice(-8);
-}
-
-export const fileEbrcService = async (payload, opts = { signMode: 'encrypted', authMode: 'accessToken' }) => {
+// File eBRC data
+export const fileEbrcService = async (payload) => {
     try {
+
+        // Check current IP for troubleshooting
         const systemIP = await checkCurrentIP();
+
+        // Validate payload against DGFT specifications
         validatePayload(payload);
 
+        // Step 4: Get access token (valid for 5 minutes)
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
 
-        console.log("=== AUTH CONTEXT ===");
-        console.log("baseUrl:", baseUrl);
-        console.log("clientId(raw):", JSON.stringify(clientId));
-        console.log("x-api-key length:", apiKey?.length);
-        console.log("accessToken length:", accessToken?.length);
-
-        for (const [i, c] of [...clientId].entries()) {
-            if (c.charCodeAt(0) < 32) console.log(`DEBUG clientId hidden char at ${i}: ${c.charCodeAt(0)}`);
-        }
-
+        // Steps 1-5: Encryption and signature process 
         const encryptionResult = await encryptPayload(payload);
-        const toSign = opts.signMode === 'payloadBase64'
-            ? encryptionResult.payloadBase64
-            : encryptionResult.encodedData;
 
-        const digitalSignature = createDigitalSignature(toSign);
+        //  Sign the encoded encrypted message (from Step 4)
+        const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
+
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
-        console.log("secretVal length:", encryptedAESKey.length);
 
-        const messageID = payload.requestId || crypto.randomUUID().slice(0, 50);
+        //  request as per dgft
+        const requestBody = {
+            data: encryptionResult.encodedData,
+            sign: digitalSignature
+        };
 
+        // Generate messageID if not provided
+        const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
+
+        // Step 6: Headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
+            "accessToken": accessToken,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
             "messageID": messageID
         };
 
-        if (opts.authMode === 'accessToken') {
-            headers["accessToken"] = accessToken;
-        } else if (opts.authMode === 'authorization') {
-            headers["Authorization"] = `Bearer ${accessToken}`;
-        } else if (opts.authMode === 'both') {
-            headers["accessToken"] = accessToken;
-            headers["Authorization"] = `Bearer ${accessToken}`;
-        }
 
-        if (opts.includeCamelCase) headers["clientId"] = clientId;
-
-        console.log("=== OUTBOUND HEADERS (names:length) ===");
-        Object.entries(headers).forEach(([k, v]) => console.log(`${k}:${(v || '').length}`));
-
-        const requestBody = { data: encryptionResult.encodedData, sign: digitalSignature };
-        console.log("POST URL:", `${baseUrl}/pushIRMToGenEBRC`);
-
-        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
-            headers,
-            timeout: 30000,
-            validateStatus: s => s < 500
-        });
+        // Make API call with detailed error handling
+        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
+            requestBody,
+            {
+                headers,
+                timeout: 30000,
+                validateStatus: function (status) {
+                    return status < 500; // Don't throw on 4xx errors, we want to see the response
+                }
+            });
 
         if (response.status !== 200) {
-            console.error(`${response.status} body:`, response.data);
+            console.error("=== NON-200 RESPONSE ANALYSIS ===");
+            console.error("Status Code:", response.status);
+            console.error("Status Text:", response.statusText);
+
             const status = response.status.toString();
             const errorMsg = ERROR_CODES[status] || response.data?.message || `HTTP ${response.status}`;
+
+            if (response.status === 403) {
+                console.error("=== 403 FORBIDDEN ANALYSIS ===");
+                console.error("Possible causes:");
+                console.error("1. IP not whitelisted:", systemIP.ip);
+                console.error("2. Invalid client_id:", clientId);
+                console.error("3. Invalid x-api-key");
+            }
             throw new Error(`eBRC filing failed: ${errorMsg}`);
         }
 
-        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain);
-        return { success: true, messageID, data: decryptedData, timestamp: new Date().toISOString(), systemIP: systemIP.ip };
+        // Step 7: Decrypt and verify response - CORRECTED
+        console.log("Decrypting and verifying response...");
+        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain, encryptionResult.saltString);
+
+        console.log("=== eBRC FILING SUCCESSFUL ===");
+        return {
+            success: true,
+            messageID: messageID,
+            data: decryptedData,
+            message: "eBRC data filed successfully with DGFT",
+            timestamp: new Date().toISOString(),
+            systemIP: systemIP.ip
+        };
+
     } catch (error) {
+        console.error("=== eBRC FILING ERROR ===");
+        console.error("Error type:", error.constructor.name);
+        console.error("Error message:", error.message);
+        console.error("Timestamp:", new Date().toISOString());
+
         if (error.response) {
+            console.error("HTTP Status:", error.response.status);
+            console.error("Response Headers:", JSON.stringify(error.response.headers, null, 2));
+            console.error("Response Data:", JSON.stringify(error.response.data, null, 2));
+
             const status = error.response.status.toString();
             const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
-            return { success: false, error: errorMsg, httpStatus: error.response.status, timestamp: new Date().toISOString(), details: error.response.data };
+
+            return {
+                success: false,
+                error: errorMsg,
+                httpStatus: error.response.status,
+                timestamp: new Date().toISOString(),
+                details: error.response.data,
+                headers: error.response.headers
+            };
         }
-        return { success: false, error: error.message, timestamp: new Date().toISOString() };
+
+        if (error.code) {
+            console.error("Network error code:", error.code);
+        }
+        return {
+            success: false,
+            error: error.message,
+            timestamp: new Date().toISOString()
+        };
     }
-};
+};     
