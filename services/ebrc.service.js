@@ -191,15 +191,23 @@ export const getSandboxToken = async () => {
     }
 };
 
-function generate32CharKeyboardSecret() {
-    // DGFT example uses specific characters including dots and hyphens
-    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-';
-    let secret = '';
-    for (let i = 0; i < 32; i++) {
-        secret += keyboardChars[Math.floor(Math.random() * keyboardChars.length)];
+async function generateDynamic32CharSecret(appName = "dgft-eBRC") {
+    // Get current IP (local or public)
+    let ip = "127.0.0.1";
+    try {
+        const ipInfo = await checkCurrentIP();
+        ip = ipInfo.ip || ip;
+    } catch { }
+    // Use timestamp or random number for uniqueness
+    const rand = Date.now().toString();
+    // Compose and pad/truncate to 32 chars
+    let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`;
+    if (base.length < 32) {
+        base = base.padEnd(32, '0');
+    } else if (base.length > 32) {
+        base = base.slice(0, 32);
     }
-    console.log("32-character keyboard secret generated");
-    return secret;
+    return base;
 }
 
 //  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
@@ -225,8 +233,8 @@ function encryptPayload(payload) {
         console.log("Step 2: JSON message Base64 encoded");
 
         //  Step 3: Using DGFT  secret key and salt
-        const secretPlain = generate32CharKeyboardSecret();
-        const saltString = generate32CharKeyboardSecret();
+        const secretPlain = generateDynamic32CharSecret();
+        const saltString = generateDynamic32CharSecret();
         const aesKey = generateAESKey(secretPlain, saltString);
         console.log("Step 3: Using DGFT samle secret key and salt");
 
@@ -563,9 +571,9 @@ export const fileEbrcService = async (payload) => {
 
         //  Sign the encoded encrypted message (from Step 4)
         const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
-  
+
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
-      
+
         //  request as per dgft
         const requestBody = {
             data: encryptionResult.encodedData,
