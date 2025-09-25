@@ -132,28 +132,28 @@ export const validateEnvironmentSetup = () => {
 
     Object.entries(requiredEnvVars).forEach(([key, value]) => {
         if (!value) {
-            console.error(`❌ ${key} is missing or empty`);
+            console.error(` ${key} is missing or empty`);
             hasErrors = true;
         } else {
-            console.log(`✅ ${key} is configured (length: ${value.length})`);
+            console.log(` ${key} is configured (length: ${value.length})`);
         }
     });
 
     // Validate key formats
     if (userPrivateKey) {
         const hasPrivateKeyHeaders = userPrivateKey.includes('-----BEGIN') && userPrivateKey.includes('-----END');
-        console.log(`Private Key Format: ${hasPrivateKeyHeaders ? '✅ Valid' : '❌ Missing headers'}`);
+        console.log(`Private Key Format: ${hasPrivateKeyHeaders ? ' Valid' : ' Missing headers'}`);
     }
 
     if (dgftPublicKey) {
         const hasPublicKeyHeaders = dgftPublicKey.includes('-----BEGIN') && dgftPublicKey.includes('-----END');
-        console.log(`DGFT Public Key Format: ${hasPublicKeyHeaders ? '✅ Valid' : '❌ Missing headers'}`);
+        console.log(`DGFT Public Key Format: ${hasPublicKeyHeaders ? ' Valid' : ' Missing headers'}`);
     }
 
     return !hasErrors;
 };
 
-// FIXED: Direct client_secret authentication (no PBKDF2)
+// Access token generation : 
 export const getSandboxToken = async () => {
     try {
         console.log("=== TOKEN GENERATION (Step 3) - DGFT Method ===");
@@ -162,11 +162,6 @@ export const getSandboxToken = async () => {
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
-
-        console.log("Client ID:", clientId);
-        console.log("Endpoint:", `${accessTokenBaseUrl}/getAccessToken`);
-        console.log("Salt length:", salt.length);
-        console.log("Final secret length:", finalSecret.length);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
@@ -182,19 +177,8 @@ export const getSandboxToken = async () => {
                 timeout: 15000
             }
         );
-
-        console.log("Token response status:", response.status);
-        console.log("Token expires in:", response.data.expiresIn, "seconds");
         return response;
     } catch (error) {
-        console.error("=== TOKEN ERROR ===");
-        console.error("Status:", error.response?.status);
-        console.error("Response:", error.response?.data);
-        console.error("Request body:", {
-            client_id: clientId,
-            client_secret: "[ENCRYPTED]"
-        });
-
         const status = error.response?.status?.toString();
         const errorMsg = ERROR_CODES[status] || error.response?.data?.message || error.message;
 
@@ -203,7 +187,6 @@ export const getSandboxToken = async () => {
             const systemIP = await checkCurrentIP();
             console.error("403 Error - IP may need whitelisting:", systemIP.ip);
         }
-
         throw new Error(`Authentication failed: ${errorMsg}`);
     }
 };
@@ -241,12 +224,11 @@ function encryptPayload(payload) {
         const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
         console.log("Step 2: JSON message Base64 encoded");
 
-        // === HARDCODED SECRET KEY AND SALT FOR DGFT DEBUGGING ===
-        const secretPlain = "dgft-192.168.186.381718185454806";
-        const saltString = "dgft-192.168.186.381718185454845";
-        console.log("Step 3: Using DGFT sample secret key and salt");
-
+        //  Step 3: Using DGFT  secret key and salt
+        const secretPlain = generate32CharKeyboardSecret();
+        const saltString = generate32CharKeyboardSecret();
         const aesKey = generateAESKey(secretPlain, saltString);
+        console.log("Step 3: Using DGFT samle secret key and salt");
 
         // Generate random 12-byte IV
         const iv = crypto.randomBytes(12);
@@ -280,7 +262,7 @@ function encryptPayload(payload) {
     }
 }
 
-// Digital signature using RSA-SHA256 - CORRECTED: Sign the ENCODED ENCRYPTED MESSAGE
+// Digital signature using RSA-SHA256. Sign the ENCODED ENCRYPTED MESSAGE
 function createDigitalSignature(encodedEncryptedMessage) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
@@ -291,20 +273,8 @@ function createDigitalSignature(encodedEncryptedMessage) {
 
         let privateKey = userPrivateKey.trim();
 
-        // Format private key if needed
-        if (!privateKey.startsWith('-----BEGIN')) {
-            const lines = [];
-            for (let i = 0; i < privateKey.length; i += 64) {
-                lines.push(privateKey.substring(i, i + 64));
-            }
-            privateKey = [
-                '-----BEGIN PRIVATE KEY-----',
-                ...lines,
-                '-----END PRIVATE KEY-----'
-            ].join('\n');
-        }
+        //  Sign the ENCODED ENCRYPTED MESSAGE from Step 4
 
-        // CORRECT: Sign the ENCODED ENCRYPTED MESSAGE from Step 4
         const signer = crypto.createSign("RSA-SHA256");
         signer.update(encodedEncryptedMessage);  // This is the encoded encrypted message from Step 4
         const signature = signer.sign(privateKey, "base64");
@@ -344,7 +314,7 @@ function encryptAESKey(secretPlain) {
     }
 }
 
-// Response decryption - CORRECTED
+// Response decryption
 function decryptResponse(responseBody, secretPlain, requestSaltString) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
@@ -578,9 +548,7 @@ function validatePayload(payload) {
 export const fileEbrcService = async (payload) => {
     try {
         console.log("=== eBRC FILING REQUEST STARTED ===");
-        console.log("Client ID:", clientId);
-        console.log("Sandbox URL:", baseUrl);
-        console.log("Timestamp:", new Date().toISOString());
+
 
         // Validate environment first
         const envValid = validateEnvironmentSetup();
@@ -599,25 +567,24 @@ export const fileEbrcService = async (payload) => {
         console.log("Obtaining access token...");
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
-        console.log("Access token obtained successfully");
-        console.log("Token length:", accessToken?.length || 0);
+
 
         // Steps 1-5: Encryption and signature process - CORRECTED
         console.log("Starting encryption and signature process...");
         const encryptionResult = encryptPayload(payload);
-        console.log("Encryption completed successfully");
-        console.log("Encrypted data length:", encryptionResult.encodedData.length);
 
-        // CORRECT: Sign the encoded encrypted message (from Step 4)
+
+
+        //  Sign the encoded encrypted message (from Step 4)
         const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
         console.log("Digital signature created successfully");
-        console.log("Signature length:", digitalSignature.length);
+
 
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
         console.log("AES key encrypted successfully");
-        console.log("Encrypted AES key length:", encryptedAESKey.length);
 
-        // CORRECT: Prepare request as per specification
+
+        //  Prepare request as per specification
         const requestBody = {
             data: encryptionResult.encodedData,
             sign: digitalSignature
@@ -639,9 +606,9 @@ export const fileEbrcService = async (payload) => {
         console.log("=== REQUEST HEADERS VALIDATION ===");
         Object.entries(headers).forEach(([key, value]) => {
             if (!value) {
-                console.error(`❌ Header ${key} is missing or empty`);
+                console.error(` Header ${key} is missing or empty`);
             } else {
-                console.log(`✅ ${key}: ${key === 'accessToken' || key === 'secretVal' ? '[REDACTED]' : value} (length: ${value.length})`);
+                console.log(`${key}: ${key === 'accessToken' || key === 'secretVal' ? '[REDACTED]' : value} (length: ${value.length})`);
             }
         });
 
@@ -662,13 +629,15 @@ export const fileEbrcService = async (payload) => {
         });
 
         // Make API call with detailed error handling
-        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
-            headers,
-            timeout: 30000,
-            validateStatus: function (status) {
-                return status < 500; // Don't throw on 4xx errors, we want to see the response
-            }
-        });
+        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
+            requestBody,
+            {
+                headers,
+                timeout: 30000,
+                validateStatus: function (status) {
+                    return status < 500; // Don't throw on 4xx errors, we want to see the response
+                }
+            });
 
         console.log("=== RESPONSE RECEIVED ===");
         console.log("HTTP Status:", response.status);
