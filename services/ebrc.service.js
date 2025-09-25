@@ -207,9 +207,14 @@ async function generateDynamic32CharSecretPair(appName = "dgft-eBRC") {
     // Salt: increment last digit (if digit), else replace last char with '1'
     let salt;
     if (/\d$/.test(base)) {
-        salt = base.slice(0, -1) + ((parseInt(base.slice(-1)) + 1) % 10);
+        let lastDigit = parseInt(base.slice(-1));
+        salt = base.slice(0, -1) + ((lastDigit + 1) % 10);
     } else {
         salt = base.slice(0, -1) + '1';
+    }
+    // Ensure both are 32 chars
+    if (base.length !== 32 || salt.length !== 32) {
+        throw new Error('Secret key and salt must be 32 characters');
     }
     return { secretPlain: base, saltString: salt };
 }
