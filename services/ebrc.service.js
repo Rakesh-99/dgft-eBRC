@@ -7,7 +7,10 @@ const clientSecret = process.env.CLIENT_SECRET;
 const baseUrl = process.env.DGFT_SANDBOX_URL;
 const apiKey = process.env.X_API_KEY;
 const clientId = process.env.CLIENT_ID;
-const userPrivateKey = process.env.USER_PRIVATE_KEY;
+const userPrivateKey = process.env.USER_PRIVATE_KEY
+    ? process.env.USER_PRIVATE_KEY.replace(/\\n/g, '\n').trim()
+    : undefined;
+
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY?.replace(/\\n/g, '\n');
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
@@ -196,21 +199,16 @@ async function generateDynamic32CharSecretPair(appName = "dgft-eBRC") {
     try {
         const ipInfo = await checkCurrentIP();
         ip = ipInfo.ip || ip;
-    } catch { }
-    const rand = Date.now().toString();
-    let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`;
-    if (base.length < 32) {
-        base = base.padEnd(32, '0');
-    } else if (base.length > 32) {
-        base = base.slice(0, 32);
-    }
-    // Salt: increment last digit (if digit), else replace last char with '1'
-    let salt;
-    if (/\d$/.test(base)) {
-        salt = base.slice(0, -1) + ((parseInt(base.slice(-1)) + 1) % 10);
-    } else {
-        salt = base.slice(0, -1) + '1';
-    }
+    } catch { /* ignore */ }
+
+    const rand = crypto.randomBytes(6).toString('hex'); // 12 chars
+    let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`; // may exceed
+    if (base.length < 32) base = base.padEnd(32, '0');
+    if (base.length > 32) base = base.slice(0, 32);
+
+    // Independent 32-char salt (keyboard chars)
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._@#';
+    let salt = Array.from({ length: 32 }, () => charset[Math.floor(Math.random() * charset.length)]).join('');
     return { secretPlain: base, saltString: salt };
 }
 
@@ -227,48 +225,30 @@ function generateAESKey(secretKey, saltString) {
 async function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Section 3.1) ===");
+        const payloadJson = JSON.stringify(payload);       // Step 1
+        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64'); // Step 2
 
-        // Step 1: Create message in JSON format
-        const payloadJson = JSON.stringify(payload);
-        console.log("Step 1: JSON message created");
-
-        // Step 2: Encode the JSON message using Base64 encoding
-        const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
-        console.log("Step 2: JSON message Base64 encoded");
-
-        //  Step 3: Using DGFT  secret key and salt
-        const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
+        const { secretPlain, saltString } = await generateDynamic32CharSecretPair(); // Step 3
         const aesKey = generateAESKey(secretPlain, saltString);
-        console.log("Step 3: Using DGFT sample secret key and salt");
+        const iv = crypto.randomBytes(12); // Step 4
 
-        // Generate random 12-byte IV
-        const iv = crypto.randomBytes(12);
-        console.log("IV: Random 12 bytes generated");
-
-        // AES-256-GCM encryption of the Base64 encoded message
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         const encryptedPart = cipher.update(payloadBase64, 'utf8');
         const encryptedFinal = cipher.final();
         const authTag = cipher.getAuthTag();
-        console.log("Step 4: Message encrypted using AES-256-GCM");
 
-        //  Combine  IV (12) + salt (32) + encrypted message
         const saltBytes = Buffer.from(saltString, 'utf8');
         const encryptedData = Buffer.concat([encryptedPart, encryptedFinal, authTag]);
         const combinedData = Buffer.concat([iv, saltBytes, encryptedData]);
         const encodedData = combinedData.toString('base64');
-        console.log("Step 4: Combined data (IV + salt + encrypted) Base64 encoded");
 
         return {
-            secretPlain,
             encodedData,
             payloadBase64,
-            saltString,
-            aesKey,
-            iv
+            secretPlain,
+            saltString
         };
     } catch (error) {
-        console.error("Encryption failed:", error);
         throw new Error(`Encryption failed: ${error.message}`);
     }
 }
@@ -287,7 +267,8 @@ function createDigitalSignature(encodedEncryptedMessage) {
         //  Sign the ENCODED ENCRYPTED MESSAGE from Step 4
 
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(encodedEncryptedMessage);  // This is the encoded encrypted message from Step 4
+        signer.update(encodedEncryptedMessage, 'utf8');  // This is the encoded encrypted message from Step 4
+        signer.end();
         const signature = signer.sign(privateKey, "base64");
 
         console.log("Digital signature created using RSA-SHA256 on encoded encrypted message");
@@ -326,58 +307,37 @@ function encryptAESKey(secretPlain) {
 }
 
 // Response decryption
-function decryptResponse(responseBody, secretPlain, requestSaltString) {
+function decryptResponse(responseBody, secretPlain) {
     try {
         console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
-
-        // Step 1: Decode the response data
         const combined = Buffer.from(responseBody.data, 'base64');
-
-        // Extract components: IV (12) + salt (32) + encrypted data
         const iv = combined.slice(0, 12);
         const responseSaltBytes = combined.slice(12, 44);
-        const encryptedData = combined.slice(44);
+        const enc = combined.slice(44);
+        const authTag = enc.slice(-16);
+        const ciphertext = enc.slice(0, -16);
 
-        // For GCM, we need to separate the authTag (last 16 bytes)
-        const authTag = encryptedData.slice(-16);
-        const ciphertext = encryptedData.slice(0, -16);
-
-        console.log("Step 1: Response data components extracted");
-
-        // Step 2: Generate AES key using response salt
         const responseSaltString = responseSaltBytes.toString('utf8');
         const aesKey = generateAESKey(secretPlain, responseSaltString);
-        console.log("Step 2: AES key regenerated for decryption");
 
-        // Step 3: Decrypt the data using AES-256-GCM
         const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
         decipher.setAuthTag(authTag);
         let decrypted = decipher.update(ciphertext);
         decrypted = Buffer.concat([decrypted, decipher.final()]);
-        console.log("Step 3: Data decrypted using AES-256-GCM");
 
-        // The decrypted data should be Base64 encoded JSON
         const payloadBase64 = decrypted.toString('utf8');
         const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
 
-        // Step 4: Verify digital signature - Verify against the ENCRYPTED DATA
-        if (!dgftPublicKey) {
-            throw new Error("DGFT_PUBLIC_KEY required for signature verification");
-        }
-
+        if (!dgftPublicKey) throw new Error("DGFT_PUBLIC_KEY required");
         const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(responseBody.data);  // Verify against the encrypted data
-        const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
-
-        if (!isVerified) {
+        verifier.update(responseBody.data);
+        verifier.end();
+        if (!verifier.verify(dgftPublicKey, responseBody.sign, 'base64')) {
             throw new Error('Response digital signature verification failed');
         }
-        console.log("Step 4: Digital signature verified successfully");
-
         return JSON.parse(payloadJson);
-    } catch (error) {
-        console.error("Response decryption failed:", error);
-        throw new Error(`Response decryption failed: ${error.message}`);
+    } catch (e) {
+        throw new Error(`Response decryption failed: ${e.message}`);
     }
 }
 
@@ -556,37 +516,30 @@ function validatePayload(payload) {
 }
 
 // File eBRC data
-export const fileEbrcService = async (payload) => {
+export const fileEbrcService = async (payload, opts = { signMode: 'encrypted' }) => {
     try {
-
-        // Check current IP for troubleshooting
         const systemIP = await checkCurrentIP();
-
-        // Validate payload against DGFT specifications
         validatePayload(payload);
 
-        // Step 4: Get access token (valid for 5 minutes)
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
 
-        // Steps 1-5: Encryption and signature process 
         const encryptionResult = await encryptPayload(payload);
 
-        //  Sign the encoded encrypted message (from Step 4)
-        const digitalSignature = createDigitalSignature(encryptionResult.encodedData);
+        const toSign = opts.signMode === 'payloadBase64'
+            ? encryptionResult.payloadBase64   // Fallback if DGFT expects Step-2 base64
+            : encryptionResult.encodedData;    // Default (Java snippet)
 
+        const digitalSignature = createDigitalSignature(toSign);
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
 
-        //  request as per dgft
         const requestBody = {
             data: encryptionResult.encodedData,
             sign: digitalSignature
         };
 
-        // Generate messageID if not provided
-        const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
+        const messageID = payload.requestId || crypto.randomUUID().slice(0, 50);
 
-        // Step 6: Headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
@@ -596,81 +549,39 @@ export const fileEbrcService = async (payload) => {
             "messageID": messageID
         };
 
-
-        // Make API call with detailed error handling
-        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
-            requestBody,
-            {
-                headers,
-                timeout: 30000,
-                validateStatus: function (status) {
-                    return status < 500; // Don't throw on 4xx errors, we want to see the response
-                }
-            });
+        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, requestBody, {
+            headers,
+            timeout: 30000,
+            validateStatus: s => s < 500
+        });
 
         if (response.status !== 200) {
-            console.error("=== NON-200 RESPONSE ANALYSIS ===");
-            console.error("Status Code:", response.status);
-            console.error("Status Text:", response.statusText);
-
             const status = response.status.toString();
             const errorMsg = ERROR_CODES[status] || response.data?.message || `HTTP ${response.status}`;
-
-            if (response.status === 403) {
-                console.error("=== 403 FORBIDDEN ANALYSIS ===");
-                console.error("Possible causes:");
-                console.error("1. IP not whitelisted:", systemIP.ip);
-                console.error("2. Invalid client_id:", clientId);
-                console.error("3. Invalid x-api-key");
-            }
             throw new Error(`eBRC filing failed: ${errorMsg}`);
         }
 
-        // Step 7: Decrypt and verify response - CORRECTED
-        console.log("Decrypting and verifying response...");
-        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain, encryptionResult.saltString);
+        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain);
 
-        console.log("=== eBRC FILING SUCCESSFUL ===");
         return {
             success: true,
-            messageID: messageID,
+            messageID,
             data: decryptedData,
-            message: "eBRC data filed successfully with DGFT",
             timestamp: new Date().toISOString(),
             systemIP: systemIP.ip
         };
-
     } catch (error) {
-        console.error("=== eBRC FILING ERROR ===");
-        console.error("Error type:", error.constructor.name);
-        console.error("Error message:", error.message);
-        console.error("Timestamp:", new Date().toISOString());
-
         if (error.response) {
-            console.error("HTTP Status:", error.response.status);
-            console.error("Response Headers:", JSON.stringify(error.response.headers, null, 2));
-            console.error("Response Data:", JSON.stringify(error.response.data, null, 2));
-
             const status = error.response.status.toString();
             const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
-
             return {
                 success: false,
                 error: errorMsg,
                 httpStatus: error.response.status,
                 timestamp: new Date().toISOString(),
-                details: error.response.data,
-                headers: error.response.headers
+                details: error.response.data
             };
         }
-
-        if (error.code) {
-            console.error("Network error code:", error.code);
-        }
-        return {
-            success: false,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        };
+        return { success: false, error: error.message, timestamp: new Date().toISOString() };
     }
 };
