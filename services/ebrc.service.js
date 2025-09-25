@@ -191,23 +191,27 @@ export const getSandboxToken = async () => {
     }
 };
 
-async function generateDynamic32CharSecret(appName = "dgft-eBRC") {
-    // Get current IP (local or public)
+async function generateDynamic32CharSecretPair(appName = "dgft-eBRC") {
     let ip = "127.0.0.1";
     try {
         const ipInfo = await checkCurrentIP();
         ip = ipInfo.ip || ip;
     } catch { }
-    // Use timestamp or random number for uniqueness
     const rand = Date.now().toString();
-    // Compose and pad/truncate to 32 chars
     let base = `${appName}-${ip.replace(/\./g, '-')}-${rand}`;
     if (base.length < 32) {
         base = base.padEnd(32, '0');
     } else if (base.length > 32) {
         base = base.slice(0, 32);
     }
-    return base;
+    // Salt: increment last digit (if digit), else replace last char with '1'
+    let salt;
+    if (/\d$/.test(base)) {
+        salt = base.slice(0, -1) + ((parseInt(base.slice(-1)) + 1) % 10);
+    } else {
+        salt = base.slice(0, -1) + '1';
+    }
+    return { secretPlain: base, saltString: salt };
 }
 
 //  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
@@ -233,8 +237,7 @@ async function encryptPayload(payload) {
         console.log("Step 2: JSON message Base64 encoded");
 
         //  Step 3: Using DGFT  secret key and salt
-        const secretPlain = await generateDynamic32CharSecret();
-        const saltString = await generateDynamic32CharSecret();
+        const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
         const aesKey = generateAESKey(secretPlain, saltString);
         console.log("Step 3: Using DGFT sample secret key and salt");
 
