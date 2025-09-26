@@ -172,7 +172,7 @@ export const getSandboxToken = async () => {
                     "Content-Type": "application/json",
                     "x-api-key": apiKey,
                 },
-                // timeout: 15000
+                timeout: 15000
             }
         );
         console.log("Token generated successfully ");
@@ -202,11 +202,11 @@ function formatIPForKey(ip) {
 }
 
 async function generateDynamic32CharSecretPair() {
-    const appName = "dgft"; // 4 chars
+    const appName = "dgft";
 
-    const ip = "54.206.54.110"; // Your static IP
+    const ip = "54.206.54.110";
 
-    const ipPart = formatIPForKey(ip); // Now this function exists - returns "54.206.54.1100" (14 chars)
+    const ipPart = formatIPForKey(ip);
     const timestamp = Date.now().toString();
 
     // Ensure timestamp part is exactly 13 characters
@@ -216,8 +216,6 @@ async function generateDynamic32CharSecretPair() {
     } else {
         numPart = timestamp.padEnd(13, '0'); // Pad to 13 if shorter
     }
-
-    // Construct secret key: "dgft" + "-" + "54.206.54.1100" + "1727123456789" = 32 chars
     const secretPlain = `${appName}-${ipPart}${numPart}`;
 
     // Double check and force to 32 chars if needed
@@ -250,9 +248,8 @@ async function generateDynamic32CharSecretPair() {
         throw new Error(`Salt MUST be 32 chars, got ${saltString.length}: "${saltString}"`);
     }
 
-    console.log(`✅ Secret Key (32 chars): "${finalSecret}"`);
-    console.log(`✅ Salt String (32 chars): "${saltString}"`);
-    console.log(`Length verification - Secret: ${finalSecret.length}, Salt: ${saltString.length}`);
+    console.log(` Secret Key (32 chars): "${finalSecret}"`);
+    console.log(` Salt String (32 chars): "${saltString}"`);
 
     return { secretPlain: finalSecret, saltString };
 }
@@ -644,13 +641,14 @@ export const fileEbrcService = async (payload) => {
                     "Content-Type": "application/json",
                     "accessToken": accessToken,
                     "client_id": clientId,
-                    "secretVal": encryptedAESKey,          
-                }
+                    "secretVal": encryptedAESKey,
+                },
+                timeout: 30000,
             }
         );
 
         if (response.status !== 200) {
-            console.error("=== NON-200 RESPONSE ANALYSIS ===");
+
             console.error("Status Code:", response.status);
             console.error("Status Text:", response.statusText);
 
@@ -658,11 +656,8 @@ export const fileEbrcService = async (payload) => {
             const errorMsg = ERROR_CODES[status] || response.data?.message || `HTTP ${response.status}`;
 
             if (response.status === 403) {
-                console.error("=== 403 FORBIDDEN ANALYSIS ===");
-                console.error("Possible causes:");
-                console.error("1. IP not whitelisted:", systemIP.ip);
-                console.error("2. Invalid client_id:", clientId);
-                console.error("3. Invalid x-api-key");
+                console.error("403 Access forbidden !");
+
             }
             throw new Error(`eBRC filing failed: ${errorMsg}`);
         }
