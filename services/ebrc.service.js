@@ -192,40 +192,71 @@ export const getSandboxToken = async () => {
 };
 
 function formatIPForKey(ip) {
-    // Take first 14 chars of IP, pad with '0' if shorter
-    return (ip + '00000000000000').substring(0, 14);
+    // Normalize IP to exactly 14 characters for consistent key generation
+    const cleanIP = ip.replace(/[^0-9.]/g, ''); // Keep only digits and dots
+    if (cleanIP.length >= 14) {
+        return cleanIP.substring(0, 14);
+    } else {
+        return cleanIP.padEnd(14, '0');
+    }
 }
 
 async function generateDynamic32CharSecretPair() {
-    const appName = "dgft";
-    let ip = "127.0.0.1";
-    try {
-        const ipInfo = await checkCurrentIP();
-        ip = ipInfo.ip || ip;
-    } catch { }
+    const appName = "dgft"; // 4 chars
 
-    const ipPart = formatIPForKey(ip);
-    const numPart = Date.now().toString().padEnd(13, '0').substring(0, 13);
-    const secretPlain = `${appName}-${ipPart}${numPart}`.substring(0, 32);
+    const ip = "54.206.54.110"; // Your static IP
 
-    // Salt: increment last digit (if digit), else replace last char with '1'
-    let saltString;
-    const lastChar = secretPlain.charAt(31);
-    if (/\d/.test(lastChar)) {
-        saltString = secretPlain.slice(0, 31) + ((parseInt(lastChar) + 1) % 10);
+    const ipPart = formatIPForKey(ip); // Now this function exists - returns "54.206.54.1100" (14 chars)
+    const timestamp = Date.now().toString();
+
+    // Ensure timestamp part is exactly 13 characters
+    let numPart;
+    if (timestamp.length >= 13) {
+        numPart = timestamp.substring(0, 13); // Take first 13 digits
     } else {
-        saltString = secretPlain.slice(0, 31) + '1';
+        numPart = timestamp.padEnd(13, '0'); // Pad to 13 if shorter
     }
 
-    if (secretPlain.length !== 32) {
-        throw new Error(`Secret key must be 32 chars, got ${secretPlain.length}: ${secretPlain}`);
+    // Construct secret key: "dgft" + "-" + "54.206.54.1100" + "1727123456789" = 32 chars
+    const secretPlain = `${appName}-${ipPart}${numPart}`;
+
+    // Double check and force to 32 chars if needed
+    let finalSecret;
+    if (secretPlain.length > 32) {
+        finalSecret = secretPlain.substring(0, 32);
+    } else if (secretPlain.length < 32) {
+        finalSecret = secretPlain.padEnd(32, '0');
+    } else {
+        finalSecret = secretPlain;
+    }
+
+    // Generate salt by modifying last character
+    let saltString;
+    const lastChar = finalSecret.charAt(31);
+    if (/\d/.test(lastChar)) {
+        // If last char is digit, increment it (wrap around at 9->0)
+        const newDigit = (parseInt(lastChar) + 1) % 10;
+        saltString = finalSecret.slice(0, 31) + newDigit;
+    } else {
+        // If last char is not digit, replace with '1'
+        saltString = finalSecret.slice(0, 31) + '1';
+    }
+
+    // Final validation - throw error if not exactly 32 chars
+    if (finalSecret.length !== 32) {
+        throw new Error(`Secret key MUST be 32 chars, got ${finalSecret.length}: "${finalSecret}"`);
     }
     if (saltString.length !== 32) {
-        throw new Error(`Salt must be 32 chars, got ${saltString.length}: ${saltString}`);
+        throw new Error(`Salt MUST be 32 chars, got ${saltString.length}: "${saltString}"`);
     }
 
-    return { secretPlain, saltString };
+    console.log(`✅ Secret Key (32 chars): "${finalSecret}"`);
+    console.log(`✅ Salt String (32 chars): "${saltString}"`);
+    console.log(`Length verification - Secret: ${finalSecret.length}, Salt: ${saltString.length}`);
+
+    return { secretPlain: finalSecret, saltString };
 }
+
 
 //  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
 function generateAESKey(secretKey, saltString) {
@@ -582,8 +613,6 @@ function validatePayload(payload) {
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
-
-        // Check current IP for troubleshooting
         const systemIP = await checkCurrentIP();
 
         // Validate payload against DGFT specifications
@@ -601,7 +630,7 @@ export const fileEbrcService = async (payload) => {
 
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
 
-        //  request as per dgft
+        //  request body . 
         const requestBody = {
             data: encryptionResult.encodedData,
             sign: digitalSignature
@@ -614,6 +643,7 @@ export const fileEbrcService = async (payload) => {
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
+            "Authorization": `Bearer ${accessToken}`,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
@@ -628,7 +658,7 @@ export const fileEbrcService = async (payload) => {
                 headers,
                 timeout: 30000,
                 validateStatus: function (status) {
-                    return status < 500; // Don't throw on 4xx errors, we want to see the response
+                    return status < 500;
                 }
             });
 
