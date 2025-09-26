@@ -43,7 +43,7 @@ export const getSandboxToken = async () => {
 // FIXED: Correct 32-character key generation matching Java example
 function generateDynamic32CharSecretKey() {
     const appName = "dgft";
-    const ip = "192.168.186.38";  // Use consistent IP format like Java example
+    const ip = "54.206.54.110";  
     const timestamp = Date.now().toString();
 
     // Match Java example pattern exactly
@@ -118,17 +118,17 @@ async function encryptPayload(payload) {
 }
 
 //  Sign the Base64 encoded JSON (Step 2)
-function createDigitalSignature(encodedVal) {
+function createDigitalSignature(dataToSign) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
-        console.log("Signing Base64 JSON with RSA-SHA256 (PKCS#1 v1.5)");
+        console.log("Signing data (should be Step 4's Base64 output)");
 
         if (!userPrivateKey) {
             throw new Error("USER_PRIVATE_KEY not found");
         }
 
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(Buffer.from(encodedVal, 'utf8')); // Sign exact bytes
+        signer.update(Buffer.from(dataToSign, 'utf8'));
         const signature = signer.sign(userPrivateKey, "base64");
 
         console.log("Digital signature created successfully");
