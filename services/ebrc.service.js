@@ -180,7 +180,7 @@ export const fileEbrcService = async (payload) => {
         const encryptionResult = await encryptPayload(payload);
 
         // Digital signature (Step 5) - Sign the Base64 encoded JSON
-        const digitalSignature = createDigitalSignature(encryptionResult.encodedVal);
+     const digitalSignature = createDigitalSignature(encryptionResult.encryptedData);
 
         // Encrypt secret key (Step 6)
         const encryptedSecretKey = encryptSecretKey(encryptionResult.secretKey);
