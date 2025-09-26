@@ -66,7 +66,7 @@ async function encryptPayload(payload) {
         console.log("=== ENCRYPTION PROCESS (Following Java Implementation) ===");
 
         // Step 1: Create JSON message
-        const jsonData = JSON.stringify(payload).replace(/\s+/g, '');
+        const jsonData = JSON.stringify(payload, Object.keys(payload).sort(), 0).replace(/\s+/g, '');
         console.log("Step 1: JSON message created");
 
         // Step 2: Base64 encode the JSON
@@ -121,23 +121,17 @@ async function encryptPayload(payload) {
 function createDigitalSignature(encodedVal) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
-        console.log("Signing the Base64 encoded JSON message with PKCS#1 v1.5");
+        console.log("Signing Base64 JSON with RSA-SHA256 (PKCS#1 v1.5)");
 
         if (!userPrivateKey) {
             throw new Error("USER_PRIVATE_KEY not found");
         }
 
-        // Use explicit PKCS#1 v1.5 padding (not PSS)
-        const signature = crypto.privateSign(
-            "sha256",
-            Buffer.from(encodedVal, 'utf8'),
-            {
-                key: userPrivateKey,
-                padding: crypto.constants.RSA_PKCS1_PADDING
-            }
-        ).toString('base64');
+        const signer = crypto.createSign("RSA-SHA256");
+        signer.update(Buffer.from(encodedVal, 'utf8')); // Sign exact bytes
+        const signature = signer.sign(userPrivateKey, "base64");
 
-        console.log("Digital signature created using RSA-SHA256 with PKCS#1 v1.5");
+        console.log("Digital signature created successfully");
         return signature;
     } catch (error) {
         console.error("Digital signature failed:", error);
