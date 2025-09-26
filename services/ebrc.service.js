@@ -309,7 +309,7 @@ async function encryptPayload(payload) {
 function createDigitalSignature(payloadBase64) {
     const signer = crypto.createSign("RSA-SHA256");
     signer.update(payloadBase64);  // Sign the Base64 encoded JSON
-    const signature = signer.sign(privateKey, "base64");
+    const signature = signer.sign(userPrivateKey, "base64");
     return signature;
 }
 
