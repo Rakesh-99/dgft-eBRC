@@ -66,7 +66,7 @@ async function encryptPayload(payload) {
         console.log("=== ENCRYPTION PROCESS (Following Java Implementation) ===");
 
         // Step 1: Create JSON message
-        const jsonData = JSON.stringify(payload);
+        const jsonData = JSON.stringify(payload).replace(/\s+/g, '');
         console.log("Step 1: JSON message created");
 
         // Step 2: Base64 encode the JSON
