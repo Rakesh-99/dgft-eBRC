@@ -642,7 +642,7 @@ export const fileEbrcService = async (payload) => {
         // Step 6: Headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
-            "accessToken": accessToken,
+            // "accessToken": accessToken,
             "Authorization": `Bearer ${accessToken}`,
             "client_id": clientId,
             "secretVal": encryptedAESKey,
