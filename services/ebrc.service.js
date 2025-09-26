@@ -630,37 +630,24 @@ export const fileEbrcService = async (payload) => {
 
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
 
-        //  request body . 
-        const requestBody = {
-            data: encryptionResult.encodedData,
-            sign: digitalSignature
-        };
-
         // Generate messageID if not provided
         const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
 
-        // Step 6: Headers as per DGFT specification
-        const headers = {
-            "Content-Type": "application/json",
-            // "accessToken": accessToken,
-            "Authorization": `Bearer ${accessToken}`,
-            "client_id": clientId,
-            "secretVal": encryptedAESKey,
-            "x-api-key": apiKey,
-            "messageID": messageID
-        };
-
-
-        // Make API call with detailed error handling
+        // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
-            requestBody,
             {
-                headers,
-                timeout: 30000,
-                validateStatus: function (status) {
-                    return status < 500;
+                data: encryptionResult.encodedData,
+                sign: digitalSignature
+            },
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "accessToken": accessToken,
+                    "client_id": clientId,
+                    "secretVal": encryptedAESKey,          
                 }
-            });
+            }
+        );
 
         if (response.status !== 200) {
             console.error("=== NON-200 RESPONSE ANALYSIS ===");
