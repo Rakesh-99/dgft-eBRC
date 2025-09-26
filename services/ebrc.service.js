@@ -45,64 +45,64 @@ function generateDynamic32CharSecretKey() {
     const appName = "dgft";
     const ip = "192.168.186.38";  // Use consistent IP format like Java example
     const timestamp = Date.now().toString();
-    
+
     // Match Java example pattern exactly
     const secretKey = `${appName}-${ip}${timestamp}`.substring(0, 32);
     const salt = `${appName}-${ip}${timestamp}5`.substring(0, 32);  // Append '5' like Java example
-    
+
     // Ensure exactly 32 characters
     const paddedSecret = secretKey.padEnd(32, '0');
     const paddedSalt = salt.padEnd(32, '5');
-    
+
     console.log("Generated secret key:", paddedSecret);
     console.log("Generated salt:", paddedSalt);
-    
+
     return { secretKey: paddedSecret, salt: paddedSalt };
 }
 
-// FIXED: Encryption process matching Java implementation exactly
+//  Encryption process 
 async function encryptPayload(payload) {
     try {
         console.log("=== ENCRYPTION PROCESS (Following Java Implementation) ===");
-        
+
         // Step 1: Create JSON message
         const jsonData = JSON.stringify(payload);
         console.log("Step 1: JSON message created");
-        
+
         // Step 2: Base64 encode the JSON
         const encodedVal = Buffer.from(jsonData, 'utf8').toString('base64');
         console.log("Step 2: JSON Base64 encoded");
-        
-        // Step 3: Generate dynamic 32-character secret key (matching Java)
+
+        // Step 3: Generate dynamic 32-character secret key 
         const { secretKey, salt } = generateDynamic32CharSecretKey();
-        
-        // Step 4: Generate AES key using PBKDF2 (exactly as in Java)
+
+        // Step 4: Generate AES key using PBKDF2 
         const saltBytes = Buffer.from(salt, 'utf8');
         const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
         console.log("Step 4: AES key generated using PBKDF2WithHmacSHA256");
-        
+
         // Generate random 12-byte IV (as in Java)
         const iv = crypto.randomBytes(12);
-        
+
         // AES-GCM encryption
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
         let encrypted = cipher.update(encodedVal, 'utf8');
         encrypted = Buffer.concat([encrypted, cipher.final()]);
         const authTag = cipher.getAuthTag();
-        
+
         // Combine encrypted data + authTag
         const cipherText = Buffer.concat([encrypted, authTag]);
-        
+
         // Step 4 continuation: Append IV + Salt + EncryptedText (as per Java ByteBuffer)
         const combinedData = Buffer.concat([
             iv,          // 12 bytes
             saltBytes,   // 32 bytes  
             cipherText   // encrypted + authTag
         ]);
-        
+
         const encryptedData = combinedData.toString('base64');
         console.log("Step 4: Combined data (IV + Salt + Encrypted) encoded");
-        
+
         return {
             secretKey,
             salt,
@@ -117,21 +117,27 @@ async function encryptPayload(payload) {
     }
 }
 
-// FIXED: Sign the Base64 encoded JSON (Step 2), not the encrypted data
-function createDigitalSignature(encodedVal) {  // Sign the Base64 JSON, not encrypted data
+//  Sign the Base64 encoded JSON (Step 2)
+function createDigitalSignature(encodedVal) {
     try {
         console.log("=== DIGITAL SIGNATURE (Step 5) ===");
-        console.log("Signing the Base64 encoded JSON message");
-        
+        console.log("Signing the Base64 encoded JSON message with PKCS#1 v1.5");
+
         if (!userPrivateKey) {
             throw new Error("USER_PRIVATE_KEY not found");
         }
-        
-        const signer = crypto.createSign("RSA-SHA256");
-        signer.update(encodedVal);  // Sign the Base64 encoded JSON from Step 2
-        const signature = signer.sign(userPrivateKey, "base64");
-        
-        console.log("Digital signature created on Base64 encoded JSON");
+
+        // Use explicit PKCS#1 v1.5 padding (not PSS)
+        const signature = crypto.privateSign(
+            "sha256",
+            Buffer.from(encodedVal, 'utf8'),
+            {
+                key: userPrivateKey,
+                padding: crypto.constants.RSA_PKCS1_PADDING
+            }
+        ).toString('base64');
+
+        console.log("Digital signature created using RSA-SHA256 with PKCS#1 v1.5");
         return signature;
     } catch (error) {
         console.error("Digital signature failed:", error);
@@ -139,15 +145,15 @@ function createDigitalSignature(encodedVal) {  // Sign the Base64 JSON, not encr
     }
 }
 
-// FIXED: RSA encryption with proper padding (matching Java)
+//  RSA encryption with proper padding 
 function encryptSecretKey(secretKey) {
     try {
         console.log("=== SECRET KEY ENCRYPTION (Step 6) ===");
-        
+
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY not found");
         }
-        
+
         // Use RSA-OAEP with SHA-256 as per Java specification
         const encryptedKey = crypto.publicEncrypt(
             {
@@ -157,7 +163,7 @@ function encryptSecretKey(secretKey) {
             },
             Buffer.from(secretKey, 'utf8')
         ).toString('base64');
-        
+
         console.log("Secret key encrypted using RSA-OAEP-SHA256");
         return encryptedKey;
     } catch (error) {
@@ -166,34 +172,34 @@ function encryptSecretKey(secretKey) {
     }
 }
 
-// FIXED: Complete eBRC filing process
+//  Complete eBRC filing process
 export const fileEbrcService = async (payload) => {
     try {
         console.log("=== STARTING eBRC FILING PROCESS ===");
-        
+
         // Get access token
         const tokenResponse = await getSandboxToken();
         const accessToken = tokenResponse.data.accessToken;
         console.log("Access token obtained");
-        
+
         // Encryption process (Steps 1-4)
         const encryptionResult = await encryptPayload(payload);
-        
+
         // Digital signature (Step 5) - Sign the Base64 encoded JSON
         const digitalSignature = createDigitalSignature(encryptionResult.encodedVal);
-        
+
         // Encrypt secret key (Step 6)
         const encryptedSecretKey = encryptSecretKey(encryptionResult.secretKey);
-        
+
         // Prepare request body as per DGFT format
         const requestBody = {
             data: encryptionResult.encryptedData,
             sign: digitalSignature
         };
-        
+
         // Generate messageID
         const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
-        
+
         // Headers as per DGFT specification
         const headers = {
             "Content-Type": "application/json",
@@ -203,18 +209,18 @@ export const fileEbrcService = async (payload) => {
             "x-api-key": apiKey,
             "messageID": messageID
         };
-        
+
         console.log("=== REQUEST DETAILS ===");
         console.log("URL:", `${baseUrl}/pushIRMToGenEBRC`);
         console.log("Headers:", { ...headers, accessToken: '[HIDDEN]', secretVal: '[HIDDEN]' });
         console.log("Body structure:", { data: '[ENCRYPTED]', sign: '[SIGNATURE]' });
-        
+
         // Make API call
-        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`, 
-            requestBody, 
+        const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
+            requestBody,
             { headers, timeout: 30000 }
         );
-        
+
         console.log("=== eBRC FILING SUCCESSFUL ===");
         return {
             success: true,
@@ -222,12 +228,12 @@ export const fileEbrcService = async (payload) => {
             data: response.data,
             message: "eBRC data filed successfully with DGFT"
         };
-        
+
     } catch (error) {
         console.error("=== eBRC FILING FAILED ===");
         console.error("Error:", error.response?.data || error.message);
         console.error("Status:", error.response?.status);
-        
+
         return {
             success: false,
             error: error.response?.data || error.message,
