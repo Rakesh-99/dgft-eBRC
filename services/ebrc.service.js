@@ -202,56 +202,33 @@ function formatIPForKey(ip) {
 }
 
 async function generateDynamic32CharSecretPair() {
-    const appName = "dgft";
+    try {
+        const appName = "dgft";
 
-    const ip = "54.206.54.110";
+        // Get actual system IP
+        const systemIP = await checkCurrentIP();
+        if (!systemIP.ip || systemIP.ip === 'unknown') {
+            throw new Error('Could not determine system IP');
+        }
 
-    const ipPart = formatIPForKey(ip);
-    const timestamp = Date.now().toString();
+        const ipPart = formatIPForKey(systemIP.ip);
+        const timestamp = Date.now().toString();
 
-    // Ensure timestamp part is exactly 13 characters
-    let numPart;
-    if (timestamp.length >= 13) {
-        numPart = timestamp.substring(0, 13); // Take first 13 digits
-    } else {
-        numPart = timestamp.padEnd(13, '0'); // Pad to 13 if shorter
+        // Ensure timestamp part is exactly 13 characters
+        const numPart = timestamp.substring(0, 13).padEnd(13, '0');
+
+        // Combine parts to make 32-char key
+        const secretPlain = `${appName}-${ipPart}${numPart}`;
+
+        // Generate salt by modifying last character
+        const saltString = secretPlain.slice(0, 31) + '1';
+
+        console.log(`Using system IP: ${systemIP.ip}`);
+
+        return { secretPlain, saltString };
+    } catch (error) {
+        throw new Error(`Secret key generation failed: ${error.message}`);
     }
-    const secretPlain = `${appName}-${ipPart}${numPart}`;
-
-    // Double check and force to 32 chars if needed
-    let finalSecret;
-    if (secretPlain.length > 32) {
-        finalSecret = secretPlain.substring(0, 32);
-    } else if (secretPlain.length < 32) {
-        finalSecret = secretPlain.padEnd(32, '0');
-    } else {
-        finalSecret = secretPlain;
-    }
-
-    // Generate salt by modifying last character
-    let saltString;
-    const lastChar = finalSecret.charAt(31);
-    if (/\d/.test(lastChar)) {
-        // If last char is digit, increment it (wrap around at 9->0)
-        const newDigit = (parseInt(lastChar) + 1) % 10;
-        saltString = finalSecret.slice(0, 31) + newDigit;
-    } else {
-        // If last char is not digit, replace with '1'
-        saltString = finalSecret.slice(0, 31) + '1';
-    }
-
-    // Final validation - throw error if not exactly 32 chars
-    if (finalSecret.length !== 32) {
-        throw new Error(`Secret key MUST be 32 chars, got ${finalSecret.length}: "${finalSecret}"`);
-    }
-    if (saltString.length !== 32) {
-        throw new Error(`Salt MUST be 32 chars, got ${saltString.length}: "${saltString}"`);
-    }
-
-    console.log(` Secret Key (32 chars): "${finalSecret}"`);
-    console.log(` Salt String (32 chars): "${saltString}"`);
-
-    return { secretPlain: finalSecret, saltString };
 }
 
 
