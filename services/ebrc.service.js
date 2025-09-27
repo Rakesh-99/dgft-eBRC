@@ -192,7 +192,7 @@ export const getSandboxToken = async () => {
 };
 
 function formatIPForKey(ip) {
-
+    //  IP segments are padded to 3 digits
     const ipParts = ip.split('.');
     const formattedIP = ipParts
         .map(part => part.padStart(3, '0'))
@@ -209,22 +209,28 @@ async function generateDynamic32CharSecretPair() {
             throw new Error('Could not determine system IP');
         }
 
+        // Format IP to ensure consistent length
         const formattedIP = formatIPForKey(systemIP.ip);
-        const timestamp = Date.now().toString().slice(-10);
+        
+        // Get timestamp and pad 
+        const timestamp = Date.now().toString().slice(-13);
+        const paddedTimestamp = timestamp.padStart(13, '0');
 
+        // Calculate remaining length needed
+        const baseLength = appName.length + 1 + formattedIP.length; // includes hyphen
+        const remainingNeeded = 32 - baseLength;
+        
+        // Construct 32-char key with padding
+        const secretPlain = `${appName}-${formattedIP}${paddedTimestamp.slice(0, remainingNeeded)}`;
 
-        const secretPlain = `${appName}-${formattedIP}${timestamp}`;
-
+        console.log(` Secret Key (32 chars): "${secretPlain}" (length: ${secretPlain.length})`);
 
         if (secretPlain.length !== 32) {
             throw new Error(`Invalid secret key length: ${secretPlain.length}`);
         }
 
-        // Generate salt by changing last digit
+        // Generate salt 
         const saltString = secretPlain.slice(0, -1) + '5';
-
-        console.log(`Generated secret key (32 chars): "${secretPlain}"`);
-        console.log(`Generated salt (32 chars): "${saltString}"`);
 
         return { secretPlain, saltString };
     } catch (error) {
@@ -263,7 +269,7 @@ async function encryptPayload(payload) {
     //  First 12 bytes of cryptographic key (Secret Key) 
     const iv = Buffer.from(secretPlain).slice(0, 12);
     console.log("4. IV (first 12 bytes of secret):", iv.toString('hex'));
-    
+
     const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
     const encrypted = Buffer.concat([
         cipher.update(payloadBase64, 'utf8'),  // Encrypt the Base64 string
