@@ -192,38 +192,39 @@ export const getSandboxToken = async () => {
 };
 
 function formatIPForKey(ip) {
-    // Normalize IP to exactly 14 characters for consistent key generation
-    const cleanIP = ip.replace(/[^0-9.]/g, ''); // Keep only digits and dots
-    if (cleanIP.length >= 14) {
-        return cleanIP.substring(0, 14);
-    } else {
-        return cleanIP.padEnd(14, '0');
-    }
+
+    const ipParts = ip.split('.');
+    const formattedIP = ipParts
+        .map(part => part.padStart(3, '0'))
+        .join('.');
+    return formattedIP;
 }
 
 async function generateDynamic32CharSecretPair() {
     try {
         const appName = "dgft";
-
-        // Get actual system IP
         const systemIP = await checkCurrentIP();
-        if (!systemIP.ip || systemIP.ip === 'unknown') {
+
+        if (!systemIP.ip) {
             throw new Error('Could not determine system IP');
         }
 
-        const ipPart = formatIPForKey(systemIP.ip);
-        const timestamp = Date.now().toString();
+        const formattedIP = formatIPForKey(systemIP.ip);
+        const timestamp = Date.now().toString().slice(-10);
 
-        // Ensure timestamp part is exactly 13 characters
-        const numPart = timestamp.substring(0, 13).padEnd(13, '0');
 
-        // Combine parts to make 32-char key
-        const secretPlain = `${appName}-${ipPart}${numPart}`;
+        const secretPlain = `${appName}-${formattedIP}${timestamp}`;
 
-        // Generate salt by modifying last character
-        const saltString = secretPlain.slice(0, 31) + '1';
 
-        console.log(`Using system IP: ${systemIP.ip}`);
+        if (secretPlain.length !== 32) {
+            throw new Error(`Invalid secret key length: ${secretPlain.length}`);
+        }
+
+        // Generate salt by changing last digit
+        const saltString = secretPlain.slice(0, -1) + '5';
+
+        console.log(`Generated secret key (32 chars): "${secretPlain}"`);
+        console.log(`Generated salt (32 chars): "${saltString}"`);
 
         return { secretPlain, saltString };
     } catch (error) {
@@ -232,7 +233,7 @@ async function generateDynamic32CharSecretPair() {
 }
 
 
-//  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
+//  AES key generation by salting secret key with 32 bytes using PBKDF2 
 function generateAESKey(secretKey, saltString) {
     // Convert salt string to bytes for PBKDF2
     const saltBytes = Buffer.from(saltString, 'utf8');
@@ -244,19 +245,25 @@ function generateAESKey(secretKey, saltString) {
 //  encryption process 
 async function encryptPayload(payload) {
     // Step 1: Create JSON
+    console.log("=== ENCRYPTION PROCESS ===");
     const payloadJson = JSON.stringify(payload);
+    console.log("1. JSON payload created", payloadJson);
 
     // Step 2: Base64 encode JSON
     const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
+    console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
     // Step 3: Generate 32-char secret key (you're doing this correctly)
     const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
+    console.log("3. Secret key and salt generated");
+
 
     // Step 4: AES encrypt the BASE64 JSON (not the raw JSON)
     const aesKey = crypto.pbkdf2Sync(secretPlain, Buffer.from(saltString, 'utf8'), 65536, 32, 'sha256');
     //  First 12 bytes of cryptographic key (Secret Key) 
     const iv = Buffer.from(secretPlain).slice(0, 12);
-
+    console.log("4. IV (first 12 bytes of secret):", iv.toString('hex'));
+    
     const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
     const encrypted = Buffer.concat([
         cipher.update(payloadBase64, 'utf8'),  // Encrypt the Base64 string
