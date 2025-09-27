@@ -277,7 +277,8 @@ async function encryptPayload(payload) {
 
     // Step 4: AES encrypt the BASE64 JSON (not the raw JSON)
     const aesKey = crypto.pbkdf2Sync(secretPlain, Buffer.from(saltString, 'utf8'), 65536, 32, 'sha256');
-    const iv = crypto.randomBytes(12);
+    //  First 12 bytes of cryptographic key (Secret Key) 
+    const iv = Buffer.from(secretPlain).slice(0, 12);
 
     const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
     const encrypted = Buffer.concat([
@@ -289,14 +290,17 @@ async function encryptPayload(payload) {
     // Step 5: Sign the BASE64 JSON (before encryption)
     const digitalSignature = createDigitalSignature(payloadBase64);
 
-    // Combine and encode
-    const encryptedData = Buffer.concat([encrypted, authTag]);
-    const combinedData = Buffer.concat([iv, Buffer.from(saltString, 'utf8'), encryptedData]);
-    const encodedData = combinedData.toString('base64');
+    // Combine 
+    const finalData = Buffer.concat([
+        iv,                             // 12 bytes from secret key
+        Buffer.from(saltString, 'utf8'), // 32 bytes salt
+        encrypted,                      // AES encrypted data
+        authTag                         // 16 bytes GCM tag
+    ]).toString('base64');
 
     return {
         secretPlain,
-        encodedData,
+        encodedData: finalData,
         digitalSignature,
         payloadBase64,
         saltString,
