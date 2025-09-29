@@ -192,12 +192,9 @@ export const getSandboxToken = async () => {
 };
 
 function formatIPForKey(ip) {
-    //  IP segments are padded to 3 digits
-    const ipParts = ip.split('.');
-    const formattedIP = ipParts
+    return ip.split('.')
         .map(part => part.padStart(3, '0'))
-        .join('.');
-    return formattedIP;
+        .join('.');  
 }
 
 async function generateDynamic32CharSecretPair() {
@@ -209,27 +206,25 @@ async function generateDynamic32CharSecretPair() {
             throw new Error('Could not determine system IP');
         }
 
-        // Format IP to ensure consistent length
         const formattedIP = formatIPForKey(systemIP.ip);
-        
-        // Get timestamp and pad 
-        const timestamp = Date.now().toString().slice(-13);
-        const paddedTimestamp = timestamp.padStart(13, '0');
 
-        // Calculate remaining length needed
-        const baseLength = appName.length + 1 + formattedIP.length; // includes hyphen
-        const remainingNeeded = 32 - baseLength;
-        
-        // Construct 32-char key with padding
-        const secretPlain = `${appName}-${formattedIP}${paddedTimestamp.slice(0, remainingNeeded)}`;
+        // Calculate remaining length needed for timestamp
+        const baseLength = appName.length + 1 + formattedIP.length; // dgft- + IP
+        const remainingLength = 32 - baseLength;
 
-        console.log(` Secret Key (32 chars): "${secretPlain}" (length: ${secretPlain.length})`);
+        // Get timestamp
+        const timestamp = Date.now().toString().slice(-remainingLength);
+
+        // Construct key: dgft-054.206.054.110[timestamp]
+        const secretPlain = `${appName}-${formattedIP}${timestamp}`;
+
+        console.log(`Generated secret key (32 chars): "${secretPlain}" (length: ${secretPlain.length})`);
 
         if (secretPlain.length !== 32) {
             throw new Error(`Invalid secret key length: ${secretPlain.length}`);
         }
 
-        // Generate salt 
+        // Generate salt by changing last digit
         const saltString = secretPlain.slice(0, -1) + '5';
 
         return { secretPlain, saltString };
@@ -248,10 +243,11 @@ function generateAESKey(secretKey, saltString) {
     return aesKey;
 }
 
+
 //  encryption process 
 async function encryptPayload(payload) {
     // Step 1: Create JSON
-    console.log("=== ENCRYPTION PROCESS ===");
+    console.log("Encryption start -------------------> ");
     const payloadJson = JSON.stringify(payload);
     console.log("1. JSON payload created", payloadJson);
 
@@ -259,7 +255,7 @@ async function encryptPayload(payload) {
     const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
-    // Step 3: Generate 32-char secret key (you're doing this correctly)
+    // Step 3: Generate 32-char secret key 
     const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
     console.log("3. Secret key and salt generated");
 
