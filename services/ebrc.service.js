@@ -160,6 +160,7 @@ export const getSandboxToken = async () => {
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
+        console.log("Client secret ------------> ", clientSecret);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
@@ -192,49 +193,70 @@ export const getSandboxToken = async () => {
 };
 
 function formatIPForKey(ip) {
-    return ip.split('.')
-        .map(part => part.padStart(3, '0'))
-        .join('.');  
-}
-
-async function generateDynamic32CharSecretPair() {
-    try {
-        const appName = "dgft";
-        const systemIP = await checkCurrentIP();
-
-        if (!systemIP.ip) {
-            throw new Error('Could not determine system IP');
-        }
-
-        const formattedIP = formatIPForKey(systemIP.ip);
-
-        // Calculate remaining length needed for timestamp
-        const baseLength = appName.length + 1 + formattedIP.length; // dgft- + IP
-        const remainingLength = 32 - baseLength;
-
-        // Get timestamp
-        const timestamp = Date.now().toString().slice(-remainingLength);
-
-        // Construct key: dgft-054.206.054.110[timestamp]
-        const secretPlain = `${appName}-${formattedIP}${timestamp}`;
-
-        console.log(`Generated secret key (32 chars): "${secretPlain}" (length: ${secretPlain.length})`);
-
-        if (secretPlain.length !== 32) {
-            throw new Error(`Invalid secret key length: ${secretPlain.length}`);
-        }
-
-        // Generate salt by changing last digit
-        const saltString = secretPlain.slice(0, -1) + '5';
-
-        return { secretPlain, saltString };
-    } catch (error) {
-        throw new Error(`Secret key generation failed: ${error.message}`);
+    // Normalize IP to exactly 14 characters for consistent key generation
+    const cleanIP = ip.replace(/[^0-9.]/g, ''); // Keep only digits and dots
+    if (cleanIP.length >= 14) {
+        return cleanIP.substring(0, 14);
+    } else {
+        return cleanIP.padEnd(14, '0');
     }
 }
 
+async function generateDynamic32CharSecretPair() {
+    const appName = "dgft";
 
-//  AES key generation by salting secret key with 32 bytes using PBKDF2 
+    const ip = "54.206.54.110";
+
+    const ipPart = formatIPForKey(ip);
+    const timestamp = Date.now().toString();
+
+    // Ensure timestamp part is exactly 13 characters
+    let numPart;
+    if (timestamp.length >= 13) {
+        numPart = timestamp.substring(0, 13); // Take first 13 digits
+    } else {
+        numPart = timestamp.padEnd(13, '0'); // Pad to 13 if shorter
+    }
+    const secretPlain = `${appName}-${ipPart}${numPart}`;
+
+    // Double check and force to 32 chars if needed
+    let finalSecret;
+    if (secretPlain.length > 32) {
+        finalSecret = secretPlain.substring(0, 32);
+    } else if (secretPlain.length < 32) {
+        finalSecret = secretPlain.padEnd(32, '0');
+    } else {
+        finalSecret = secretPlain;
+    }
+
+    // Generate salt by modifying last character
+    let saltString;
+    const lastChar = finalSecret.charAt(31);
+    if (/\d/.test(lastChar)) {
+        // If last char is digit, increment it (wrap around at 9->0)
+        const newDigit = (parseInt(lastChar) + 1) % 10;
+        saltString = finalSecret.slice(0, 31) + newDigit;
+    } else {
+        // If last char is not digit, replace with '1'
+        saltString = finalSecret.slice(0, 31) + '1';
+    }
+
+    // Final validation - throw error if not exactly 32 chars
+    if (finalSecret.length !== 32) {
+        throw new Error(`Secret key MUST be 32 chars, got ${finalSecret.length}: "${finalSecret}"`);
+    }
+    if (saltString.length !== 32) {
+        throw new Error(`Salt MUST be 32 chars, got ${saltString.length}: "${saltString}"`);
+    }
+
+    console.log(` Secret Key (32 chars): "${finalSecret}"`);
+    console.log(` Salt String (32 chars): "${saltString}"`);
+
+    return { secretPlain: finalSecret, saltString };
+}
+
+
+//  AES key generation by salting secret key with 32 bytes using PBKDF2 (as per Java spec)
 function generateAESKey(secretKey, saltString) {
     // Convert salt string to bytes for PBKDF2
     const saltBytes = Buffer.from(saltString, 'utf8');
@@ -243,28 +265,20 @@ function generateAESKey(secretKey, saltString) {
     return aesKey;
 }
 
-
 //  encryption process 
 async function encryptPayload(payload) {
     // Step 1: Create JSON
-    console.log("Encryption start -------------------> ");
     const payloadJson = JSON.stringify(payload);
-    console.log("1. JSON payload created", payloadJson);
 
     // Step 2: Base64 encode JSON
     const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
-    console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
-    // Step 3: Generate 32-char secret key 
+    // Step 3: Generate 32-char secret key (you're doing this correctly)
     const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
-    console.log("3. Secret key and salt generated");
-
 
     // Step 4: AES encrypt the BASE64 JSON (not the raw JSON)
     const aesKey = crypto.pbkdf2Sync(secretPlain, Buffer.from(saltString, 'utf8'), 65536, 32, 'sha256');
-    //  First 12 bytes of cryptographic key (Secret Key) 
-    const iv = Buffer.from(secretPlain).slice(0, 12);
-    console.log("4. IV (first 12 bytes of secret):", iv.toString('hex'));
+    const iv = crypto.randomBytes(12);
 
     const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
     const encrypted = Buffer.concat([
@@ -276,17 +290,14 @@ async function encryptPayload(payload) {
     // Step 5: Sign the BASE64 JSON (before encryption)
     const digitalSignature = createDigitalSignature(payloadBase64);
 
-    // Combine 
-    const finalData = Buffer.concat([
-        iv,                             // 12 bytes from secret key
-        Buffer.from(saltString, 'utf8'), // 32 bytes salt
-        encrypted,                      // AES encrypted data
-        authTag                         // 16 bytes GCM tag
-    ]).toString('base64');
+    // Combine and encode
+    const encryptedData = Buffer.concat([encrypted, authTag]);
+    const combinedData = Buffer.concat([iv, Buffer.from(saltString, 'utf8'), encryptedData]);
+    const encodedData = combinedData.toString('base64');
 
     return {
         secretPlain,
-        encodedData: finalData,
+        encodedData,
         digitalSignature,
         payloadBase64,
         saltString,
