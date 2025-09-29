@@ -160,7 +160,7 @@ export const getSandboxToken = async () => {
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
-        console.log("Client secret ------------> ", clientSecret);
+        console.log("Client secret ------------> ", finalSecret);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
