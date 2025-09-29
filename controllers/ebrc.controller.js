@@ -3,7 +3,7 @@ import expressAsyncHandler from 'express-async-handler';
 import {
     fileEbrcService,
     getSandboxToken,
- 
+
 } from "../services/ebrc.service.js";
 
 // For fetching sandbox token
@@ -39,17 +39,28 @@ export const fileEbrc = async (req, res) => {
         console.log("Request body:", JSON.stringify(req.body, null, 2));
 
         const response = await fileEbrcService(req.body);
-        return res.json({
-            success: true,
-            data: response,
-            message: "eBRC filed successfully"
-        });
+
+        if (response.success) {
+            return res.json({
+                success: true,
+                data: response,
+                message: "eBRC filed successfully"
+            });
+        } else {
+            console.log("Response ------------------------------------------>", response);
+
+            return res.status(response.httpStatus).json({
+                success: response.success,
+                message: response.error || "Failed to file eBRC",
+                details: response.headers || response.data || null
+            });
+        }
     } catch (error) {
-        console.error("=== CONTROLLER ERROR ===");
+        console.error("=== CONTROLLER ERROR ===", error);
         console.error("Error message:", error.message);
 
-        return res.status(400).json({
-            success: false,
+        return res.status(error.httpStatus).json({
+            success: error.response?.status === 400 ? 400 : 500,
             message: error.message,
             details: error.response?.data
         });
