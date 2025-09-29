@@ -219,32 +219,36 @@ async function generateDynamic32CharSecretPair() {
 }
 
 // setp 4 : AES-GCM encryption helper fn() :
-async function encryptPayloadAESGCM(payloadBase64, secretKey, salt) {
-
-    // Step 1: Generate AES 256 bits key using SHA-256(secretKey + salt)
-    const keyMaterial = secretKey + salt;
-    const key = crypto.createHash('sha256').update(keyMaterial).digest();
+async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
+    // Step 1: Generate AES 256-bit key using PBKDF2 
+    const saltBytes = Buffer.from(saltString, 'utf8');
+    const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
 
     // Step 2: Generate 12 bytes random IV
     const iv = crypto.randomBytes(12);
 
     // Step 3: Encrypt using AES-256-GCM
-    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
     const encrypted = Buffer.concat([
         cipher.update(payloadBase64, 'utf8'),
         cipher.final()
     ]);
     const authTag = cipher.getAuthTag();
 
-    // Step 4: Append IV + salt + encrypted text + authTag
+    // Step 4: Combine IV + Salt + Encrypted + AuthTag
     const finalBuffer = Buffer.concat([
-        iv, // 12 bytes IV
-        Buffer.from(salt, 'utf8'), // 32 bytes salt
-        encrypted, // encrypted text
-        authTag // 16 bytes auth tag
+        iv,                          // 12 bytes
+        saltBytes,                   // 32 bytes
+        encrypted,                   // encrypted data
+        authTag                      // 16 bytes
     ]);
 
-    return { encrypted, iv, authTag, aesKey: key };
+    return {
+        finalBuffer: finalBuffer.toString('base64'),
+        iv,
+        authTag,
+        aesKey
+    };
 }
 
 
@@ -287,23 +291,16 @@ async function encryptPayload(payload) {
     console.log("3. Secret key and salt generated", { "secret plain": secretPlain, "salt": saltString });
 
     // step 4 : calling the helper fn() to encrypt the payload using AES-GCM ------> 
-    const { encrypted, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
+    const { finalBuffer, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
 
 
     // Step 5: Sign the BASE64 JSON (before encryption)
     const digitalSignature = createDigitalSignature(payloadBase64);
 
-    // Combine 
-    const finalData = Buffer.concat([
-        iv,                             // 12 bytes from secret key
-        Buffer.from(saltString, 'utf8'), // 32 bytes salt
-        encrypted,                      // AES encrypted data
-        authTag                         // 16 bytes GCM tag
-    ]).toString('base64');
 
     return {
         secretPlain,
-        encodedData: finalData,
+        encodedData: finalBuffer,
         digitalSignature,
         payloadBase64,
         saltString,
@@ -375,13 +372,13 @@ function decryptResponse(responseBody, secretPlain, requestSaltString) {
         const payloadBase64 = decrypted.toString('utf8');
         const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
 
-        // Step 4: Verify digital signature - Verify against the ENCRYPTED DATA
+        // Step 4: Verify digital signature - against the decrypted Base64 JSON
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY required for signature verification");
         }
 
         const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(responseBody.data);  // Verify against the encrypted data
+        verifier.update(payloadBase64);  // Verify against the decrypted Base64 JSON
         const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
 
         if (!isVerified) {
@@ -590,7 +587,7 @@ export const fileEbrcService = async (payload) => {
         // Generate messageID if not provided
         const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
 
-    
+
         // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
             {
