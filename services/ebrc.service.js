@@ -588,6 +588,8 @@ export const fileEbrcService = async (payload) => {
         const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
 
 
+        console.log("THe secret val ----------> ", encryptedAESKey);
+
         // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
             {
@@ -636,35 +638,10 @@ export const fileEbrcService = async (payload) => {
 
     } catch (error) {
         console.error("=== eBRC FILING ERROR ===");
-        console.error("Error type:", error.constructor.name);
-        console.error("Error message:", error.message);
-        console.error("Timestamp:", new Date().toISOString());
 
-        if (error.response) {
-            console.error("HTTP Status:", error.response.status);
-            console.error("Response Headers:", JSON.stringify(error.response.headers, null, 2));
-            console.error("Response Data:", JSON.stringify(error.response.data, null, 2));
-
-            const status = error.response.status.toString();
-            const errorMsg = ERROR_CODES[status] || error.response.data?.message || error.message;
-
-            return {
-                success: false,
-                error: errorMsg,
-                httpStatus: error.response.status,
-                timestamp: new Date().toISOString(),
-                details: error.response.data,
-                headers: error.response.headers
-            };
+        if (error.response.status === 403) {
+            throw new Error("403 Access forbidden - Access forbidden, please verify the IP, client Id and client secret");
         }
-
-        if (error.code) {
-            console.error("Network error code:", error.code);
-        }
-        return {
-            success: false,
-            error: error.message,
-            timestamp: new Date().toISOString()
-        };
+        throw new Error(`eBRC filing failed: ${error.message}`);
     }
 };     
