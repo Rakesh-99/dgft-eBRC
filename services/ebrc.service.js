@@ -160,7 +160,10 @@ export const getSandboxToken = async () => {
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
-        console.log("THe final secret -> ", finalSecret);
+
+
+
+        console.log("Client Secret -------------------------------------------------------------------> ", finalSecret);
 
         const response = await axios.post(
             `${accessTokenBaseUrl}/getAccessToken`,
@@ -588,7 +591,12 @@ export const fileEbrcService = async (payload) => {
         const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
 
 
-        console.log("THe secret val ----------> ", encryptedAESKey);
+        console.log("The secret val -------------------------------------------------------------------> ", encryptedAESKey);
+        console.log("Access token -------------------------------------------------------------------> ", accessToken);
+        console.log("Encrypted data for body ---------------------------------------------------> ", encryptionResult.encodedData);
+        console.log("Sign ----------------------------------------------------------------> ", encryptionResult.digitalSignature);
+
+
 
         // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
