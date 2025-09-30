@@ -147,26 +147,35 @@ async function generateDynamic32CharSecretPair() {
     try {
         const appName = "dgft";
         const { ip } = await checkCurrentIP();
-
         const timestamp = Date.now().toString();
 
+        // Generate secret key
         let secretPlain = `${appName}-${ip}${timestamp}`;
 
-        //  exactly 32 characters
+        // Ensure exactly 32 characters with mixed padding
         if (secretPlain.length > 32) {
             secretPlain = secretPlain.substring(0, 32);
         } else {
-            secretPlain = secretPlain.padEnd(32, "0");
+            // Use mixed characters for padding instead of just "0"
+            const paddingChars = "0123456789abcdef";
+            while (secretPlain.length < 32) {
+                secretPlain += paddingChars[Math.floor(Math.random() * paddingChars.length)];
+            }
         }
-        // Generate salt
-        const saltTimestamp = (parseInt(timestamp) + 39).toString(); // Adding 39 to get different ending
+
+        // Generate salt with more randomness
+        const randomOffset = Math.floor(Math.random() * 1000) + 100; // Random between 100-1099
+        const saltTimestamp = (parseInt(timestamp) + randomOffset).toString();
         let saltString = `${appName}-${ip}${saltTimestamp}`;
 
-        //  exactly 32 characters for salt
+        // Ensure exactly 32 characters for salt
         if (saltString.length > 32) {
             saltString = saltString.substring(0, 32);
         } else {
-            saltString = saltString.padEnd(32, "0");
+            const saltPaddingChars = "abcdefghijklmnopqrstuvwxyz0123456789";
+            while (saltString.length < 32) {
+                saltString += saltPaddingChars[Math.floor(Math.random() * saltPaddingChars.length)];
+            }
         }
 
         console.log("Generated secret key:", secretPlain);
@@ -177,6 +186,8 @@ async function generateDynamic32CharSecretPair() {
         throw new Error(`Secret key generation failed: ${error.message}`);
     }
 }
+
+
 
 
 // setp 4 : AES-GCM encryption helper fn() :
@@ -244,15 +255,16 @@ async function encryptPayload(payload) {
 
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
-    // Step 5: Sign the BASE64 JSON (before encryption)
-    const digitalSignature = createDigitalSignature(payloadBase64);
-
     // Step 3: Generate 32-char secret key and salt string  . calling the helper fn() --------> 
     const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
     console.log("3. Secret key and salt generated", { "secret plain": secretPlain, "salt": saltString });
 
     // step 4 : calling the helper fn() to encrypt the payload using AES-GCM ------> 
     const { finalBuffer, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
+
+
+    // Step 5: Sign the BASE64 JSON (before encryption)
+    const digitalSignature = createDigitalSignature(finalBuffer);
 
 
     console.log("Encryption completed successfully");
@@ -284,7 +296,8 @@ function encryptAESKey(secretPlain) {
             {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha256'
+                oaepHash: 'sha256',
+                mgf: crypto.constants.RSA_MGF1
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
@@ -584,4 +597,5 @@ export const fileEbrcService = async (payload) => {
         }
 
     }
-};     
+};
+
