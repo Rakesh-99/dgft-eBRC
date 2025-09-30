@@ -490,7 +490,8 @@ export const fileEbrcService = async (payload) => {
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
 
         // Generate messageID
-        const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
+        const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
+
 
 
         console.log("The secret val ------------------------------------------------------> ", encryptedAESKey);
@@ -511,31 +512,76 @@ export const fileEbrcService = async (payload) => {
                     "accessToken": accessToken,
                     "client_id": clientId,
                     "secretVal": encryptedAESKey,
+                    "messageID": messageID,
+                    "x-api-key": apiKey
                 },
                 // timeout: 30000,
             }
         );
 
-        const { status, statusText, headers, pragma } = await response.data;
+        if (response.status === 200 || response.status === 201) {
+            console.log("=== SUCCESS ===");
+            console.log("Response Data:", response.data);
 
-
-        if (status === 201 || status === 200) {
-            return response.status(status).json({
+            return {
                 success: true,
-                message: "eBRC data has been successfully posted"
-            })
-        }
+                message: "eBRC data has been successfully filed",
+                data: response.data,
+                messageID: messageID
+            };
+        } else if (response.status === 403) {
+            console.error("=== 403 FORBIDDEN ERROR ===");
+            console.error("Response Data:", response.data);
 
-        if (status === 403) {
-            console.log({
-                "Status": status,
-                "Status Text ": statusText,
-                "headers": headers
-            })
-            throw new Error(`Status code -> ${status} , Status text -> ${statusText}`);
+            // Check for specific error messages in response
+            let errorMessage = "Authentication failed - 403 Forbidden";
+            if (response.data && response.data.message) {
+                errorMessage += `: ${response.data.message}`;
+            }
+            if (response.data && response.data.errors) {
+                errorMessage += `. Errors: ${JSON.stringify(response.data.errors)}`;
+            }
+
+            throw new Error(errorMessage);
+        }
+        else {
+            console.error("=== UNEXPECTED STATUS CODE ===");
+            console.error("Status:", response.status);
+            console.error("Response Data:", response.data);
+
+            throw new Error(`API returned status ${response.status}: ${response.statusText}`);
         }
     } catch (error) {
         console.error("=== eBRC FILING ERROR ===");
-        throw new Error(`eBRC filing failed: ${error.message}`);
+
+        if (error.response) {
+            // Server responded with error status
+            console.error("Error Status:", error.response.status);
+            console.error("Error Data:", error.response.data);
+            console.error("Error Headers:", error.response.headers);
+
+            // Extract more specific error information
+            let errorDetail = `HTTP ${error.response.status}`;
+            if (error.response.data) {
+                if (typeof error.response.data === 'string') {
+                    errorDetail += `: ${error.response.data}`;
+                } else if (error.response.data.message) {
+                    errorDetail += `: ${error.response.data.message}`;
+                } else {
+                    errorDetail += `: ${JSON.stringify(error.response.data)}`;
+                }
+            }
+
+            throw new Error(`eBRC filing failed: ${errorDetail}`);
+        } else if (error.request) {
+            // Request was made but no response received
+            console.error("No response received:", error.message);
+            throw new Error(`eBRC filing failed: No response from server - ${error.message}`);
+        } else {
+            // Error in request setup
+            console.error("Request setup error:", error.message);
+            throw new Error(`eBRC filing failed: ${error.message}`);
+        }
+
     }
 };     
