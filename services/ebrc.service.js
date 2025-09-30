@@ -148,19 +148,29 @@ async function generateDynamic32CharSecretPair() {
         const appName = "dgft";
         const { ip } = await checkCurrentIP();
 
-
-        const randomNum = Math.floor(Math.random() * 1e9).toString();
         const timestamp = Date.now().toString();
 
-        let secretPlain = `${appName}-${ip}.${randomNum}${timestamp}`;
+        let secretPlain = `${appName}-${ip}${timestamp}`;
+
+        //  exactly 32 characters
         if (secretPlain.length > 32) {
             secretPlain = secretPlain.substring(0, 32);
         } else {
             secretPlain = secretPlain.padEnd(32, "0");
         }
+        // Generate salt
+        const saltTimestamp = (parseInt(timestamp) + 39).toString(); // Adding 39 to get different ending
+        let saltString = `${appName}-${ip}${saltTimestamp}`;
 
-        // Generate a random 32-char salt string 
-        let saltString = `${appName}-${ip}${randomNum}`.padEnd(32, "S").substring(0, 32);
+        //  exactly 32 characters for salt
+        if (saltString.length > 32) {
+            saltString = saltString.substring(0, 32);
+        } else {
+            saltString = saltString.padEnd(32, "0");
+        }
+
+        console.log("Generated secret key:", secretPlain);
+        console.log("Generated salt string:", saltString);
 
         return { secretPlain, saltString };
     } catch (error) {
@@ -168,45 +178,56 @@ async function generateDynamic32CharSecretPair() {
     }
 }
 
+
 // setp 4 : AES-GCM encryption helper fn() :
 async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
-    // Step 1: Generate AES 256-bit key using PBKDF2 
-    const saltBytes = Buffer.from(saltString, 'utf8');
-    const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
 
-    // Step 2: Generate 12 bytes random IV
-    const iv = crypto.randomBytes(12);
+    try {
+        // Step 1: Generate AES 256-bit key using PBKDF2 
+        const saltBytes = Buffer.from(saltString, 'utf8');
+        const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
 
-    // Step 3: Encrypt using AES-256-GCM
-    const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-    const encrypted = Buffer.concat([
-        cipher.update(payloadBase64, 'utf8'),
-        cipher.final()
-    ]);
-    const authTag = cipher.getAuthTag();
+        // Step 2: Generate 12 bytes random IV
+        const iv = crypto.randomBytes(12);
 
-    // Step 4: Combine IV + Salt + Encrypted + AuthTag
-    const finalBuffer = Buffer.concat([
-        iv,                          // 12 bytes
-        saltBytes,                   // 32 bytes
-        encrypted,                   // encrypted data
-        authTag                      // 16 bytes
-    ]);
+        // Step 3: Encrypt using AES-256-GCM
+        const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
 
-    return {
-        finalBuffer: finalBuffer.toString('base64'),
-        iv,
-        authTag,
-        aesKey
-    };
+        let encrypted = cipher.update(payloadBase64, 'utf8');
+        const final = cipher.final();
+        encrypted = Buffer.concat([encrypted, final]);
+
+        const authTag = cipher.getAuthTag();
+
+        // Step 4: Combine IV + Salt + Encrypted + AuthTag
+        const finalBuffer = Buffer.concat([
+            iv,                          // 12 bytes
+            saltBytes,                   // 32 bytes
+            encrypted,                   // encrypted data
+            authTag                      // 16 bytes
+        ]);
+
+        return {
+            finalBuffer: finalBuffer.toString('base64'),
+            iv,
+            authTag,
+            aesKey
+        };
+    } catch (error) {
+        throw new Error(`AES-GCM encryption failed: ${error.message}`);
+    }
 }
 
 // step 5:  Digital signature helper fn() ------> 
 function createDigitalSignature(payloadBase64) {
-    const signer = crypto.createSign("RSA-SHA256");
-    signer.update(payloadBase64);  // Sign the Base64 encoded JSON
-    const signature = signer.sign(userPrivateKey, "base64");
-    return signature;
+    try {
+        const signer = crypto.createSign("RSA-SHA256");
+        signer.update(payloadBase64, 'utf8');  // Sign the Base64 encoded JSON (Step 2 output)
+        const signature = signer.sign(userPrivateKey, "base64");
+        return signature;
+    } catch (error) {
+        throw new Error(`Digital signature creation failed: ${error.message}`);
+    }
 }
 
 
@@ -235,6 +256,8 @@ async function encryptPayload(payload) {
     const digitalSignature = createDigitalSignature(payloadBase64);
 
 
+    console.log("Encryption completed successfully");
+
     return {
         secretPlain,
         encodedData: finalBuffer,
@@ -245,6 +268,7 @@ async function encryptPayload(payload) {
         iv
     };
 }
+
 
 
 // Encrypt secret key using DGFT public key with RSA
