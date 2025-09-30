@@ -30,51 +30,6 @@ const VALID_CURRENCY_CODES = [
     'RUR', 'TRY', 'KGS'
 ];
 
-// Error codes from DGFT specification (Annexure 6.3)
-const ERROR_CODES = {
-    '401': 'Unauthorized. Client Id and client secret not matched.',
-    '403': 'Access forbidden, please verify the IP, client Id and client secret',
-    'ERR01': 'Invalid client_Id and client_secret.',
-    'ERR02': 'Invalid header parameters, mandatory parameter is missing',
-    'ERR03': 'Invalid JSON.',
-    'ERR04': 'Invalid secret val.',
-    'ERR05': 'Invalid encryption key, not able to decrypt using the encryption key shared.',
-    'ERR06': 'Digital signature mismatch in record verification.',
-    'ERR07': 'Invalid messageId, its length shall not be greater than 50.',
-    'ERR08': 'Count mismatches. Total number of record in header and data shared not match.',
-    'ERR09': 'Duplicate message ID, messageID already shared earlier.',
-    'ERR10': 'Invalid serial number.',
-    'ERR11': 'Duplicate serial number in same message.',
-    'ERR12': 'Invalid clubID',
-    'ERR13': 'Duplicate clubID in same request message.',
-    'ERR14': 'Invalid IFSC code, its length shall be 11 digit.',
-    'ERR15': 'IFSC code doesn\'t match with the IFSC in IRM',
-    'ERR16': 'Invalid AD Code.',
-    'ERR17': 'Invalid IRM Date. Date shall be in ddMMYYYY format',
-    'ERR18': 'Invalid IRM Number.',
-    'ERR19': 'Invalid IRM number and date combination.',
-    'ERR20': 'Invalid IRM FCC, it shall match the FCC value in IRM shared by bank.',
-    'ERR21': 'Invalid purpose code',
-    'ERR22': 'Purpose code doesn\'t match with detail as per Bank data.',
-    'ERR23': 'IRM Available amount doesn\'t match with IRM available amount in DGFT system.',
-    'ERR24': 'Invalid paymentDate field in request JSON. Field is null or not in format ddMMyyyy.',
-    'ERR25': 'Invalid shipping bill number. It cannot be greater than 7 digit',
-    'ERR26': 'Invalid Softex number in the application.',
-    'ERR27': 'Invalid invoice number mentioned.',
-    'ERR28': 'Invalid shipping bill/ SOFTEX or invoice date field',
-    'ERR29': 'Invalid port code mentioned. Port code cannot be greater than 6 digit in length',
-    'ERR30': 'Port code doesn\'t exists in DGFT system.',
-    'ERR31': 'Invalid billNo its values cannot be greater than 20 digit length.',
-    'ERR32': 'Invalid values for isVostro flag. Allowed values are Y/N.',
-    'ERR33': 'Invalid vostro type specified. Allowed values are SVRA/NVRA.',
-    'ERR34': 'Invalid 3rd party export flag. Allowed values are Y/N.',
-    'ERR35': 'Invalid ORM amount specified.',
-    'ERR36': 'Declaration flag is missing.',
-    'ERR37': 'Invalid values specified for declaration flag.',
-    'ERR38': 'Total IRM mapped is more than available amount. Please check the calculation.',
-    'ERR39': 'Invoice and purpose code mapping is not correct.'
-};
-
 // Purpose codes from DGFT specification (Annexures 6.1 & 6.2)
 const VALID_PURPOSE_CODES = [
     // Inward Remittance (Annexure 6.1)
@@ -114,6 +69,8 @@ export const checkCurrentIP = async () => {
         return { ip: 'unknown' };
     }
 };
+
+
 
 export const validateEnvironmentSetup = () => {
     console.log("=== ENVIRONMENT VALIDATION ===");
@@ -156,12 +113,10 @@ export const validateEnvironmentSetup = () => {
 // Access token generation : 
 export const getSandboxToken = async () => {
     try {
-        // Generate salt and encrypt client_secret as per DGFT specification
+        // Generate salt and encrypt client_secret : 
         const salt = crypto.randomBytes(32);
         const derivedKey = crypto.pbkdf2Sync(clientSecret, salt, 65536, 32, "sha256");
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
-
-
 
         console.log("Client Secret -------------------------------------------------------------------> ", finalSecret);
 
@@ -176,22 +131,14 @@ export const getSandboxToken = async () => {
                     "Content-Type": "application/json",
                     "x-api-key": apiKey,
                 },
-                timeout: 15000
+                // timeout: 15000
             }
         );
         console.log("Token generated successfully ");
-
         return response;
     } catch (error) {
-        const status = error.response?.status?.toString();
-        const errorMsg = ERROR_CODES[status] || error.response?.data?.message || error.message;
-
-        // Check for IP issues
-        if (status === "403") {
-            const systemIP = await checkCurrentIP();
-            console.error("403 Error - IP may need whitelisting:", systemIP.ip);
-        }
-        throw new Error(`Authentication failed: ${errorMsg}`);
+        console.log(error);
+        throw new Error(`Authentication failed: ${error}`);
     }
 };
 
@@ -199,8 +146,8 @@ export const getSandboxToken = async () => {
 async function generateDynamic32CharSecretPair() {
     try {
         const appName = "dgft";
-        const systemIP = await checkCurrentIP();
-        const ip = systemIP.ip;
+        const { ip } = await checkCurrentIP();
+
 
         const randomNum = Math.floor(Math.random() * 1e9).toString();
         const timestamp = Date.now().toString();
@@ -212,7 +159,7 @@ async function generateDynamic32CharSecretPair() {
             secretPlain = secretPlain.padEnd(32, "0");
         }
 
-        // Generate a random 32-char salt string (or use a fixed one for testing)
+        // Generate a random 32-char salt string 
         let saltString = `${appName}-${ip}${randomNum}`.padEnd(32, "S").substring(0, 32);
 
         return { secretPlain, saltString };
@@ -254,25 +201,12 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
     };
 }
 
-
-
 // step 5:  Digital signature helper fn() ------> 
 function createDigitalSignature(payloadBase64) {
     const signer = crypto.createSign("RSA-SHA256");
     signer.update(payloadBase64);  // Sign the Base64 encoded JSON
     const signature = signer.sign(userPrivateKey, "base64");
     return signature;
-}
-
-
-
-//  AES key generation by salting secret key with 32 bytes using PBKDF2 
-function generateAESKey(secretKey, saltString) {
-    // Convert salt string to bytes for PBKDF2
-    const saltBytes = Buffer.from(saltString, 'utf8');
-    const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
-    console.log("AES 256-bit key generated using PBKDF2WithHmacSHA256 (65536 iterations)");
-    return aesKey;
 }
 
 
@@ -289,7 +223,7 @@ async function encryptPayload(payload) {
 
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
-    // Step 3: Generate 32-char secret key . calling the helper fn() --------> 
+    // Step 3: Generate 32-char secret key and salt string  . calling the helper fn() --------> 
     const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
     console.log("3. Secret key and salt generated", { "secret plain": secretPlain, "salt": saltString });
 
@@ -340,61 +274,7 @@ function encryptAESKey(secretPlain) {
     }
 }
 
-// Response decryption
-function decryptResponse(responseBody, secretPlain, requestSaltString) {
-    try {
-        console.log("=== RESPONSE DECRYPTION (Section 3.2) ===");
 
-        // Step 1: Decode the response data
-        const combined = Buffer.from(responseBody.data, 'base64');
-
-        // Extract components: IV (12) + salt (32) + encrypted data
-        const iv = combined.slice(0, 12);
-        const responseSaltBytes = combined.slice(12, 44);
-        const encryptedData = combined.slice(44);
-
-        // For GCM, we need to separate the authTag (last 16 bytes)
-        const authTag = encryptedData.slice(-16);
-        const ciphertext = encryptedData.slice(0, -16);
-
-        console.log("Step 1: Response data components extracted");
-
-        // Step 2: Generate AES key using response salt
-        const responseSaltString = responseSaltBytes.toString('utf8');
-        const aesKey = generateAESKey(secretPlain, responseSaltString);
-        console.log("Step 2: AES key regenerated for decryption");
-
-        // Step 3: Decrypt the data using AES-256-GCM
-        const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
-        decipher.setAuthTag(authTag);
-        let decrypted = decipher.update(ciphertext);
-        decrypted = Buffer.concat([decrypted, decipher.final()]);
-        console.log("Step 3: Data decrypted using AES-256-GCM");
-
-        // The decrypted data should be Base64 encoded JSON
-        const payloadBase64 = decrypted.toString('utf8');
-        const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf8');
-
-        // Step 4: Verify digital signature - against the decrypted Base64 JSON
-        if (!dgftPublicKey) {
-            throw new Error("DGFT_PUBLIC_KEY required for signature verification");
-        }
-
-        const verifier = crypto.createVerify('RSA-SHA256');
-        verifier.update(payloadBase64);  // Verify against the decrypted Base64 JSON
-        const isVerified = verifier.verify(dgftPublicKey, responseBody.sign, 'base64');
-
-        if (!isVerified) {
-            throw new Error('Response digital signature verification failed');
-        }
-        console.log("Step 4: Digital signature verified successfully");
-
-        return JSON.parse(payloadJson);
-    } catch (error) {
-        console.error("Response decryption failed:", error);
-        throw new Error(`Response decryption failed: ${error.message}`);
-    }
-}
 
 function validatePayload(payload) {
     console.log("Validating payload ............");
@@ -573,7 +453,6 @@ function validatePayload(payload) {
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
-        const systemIP = await checkCurrentIP();
 
         // Validate payload against DGFT specifications
         validatePayload(payload);
@@ -587,15 +466,14 @@ export const fileEbrcService = async (payload) => {
 
         const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
 
-        // Generate messageID if not provided
+        // Generate messageID
         const messageID = payload.requestId || crypto.randomUUID().substring(0, 50);
 
 
-        console.log("The secret val -------------------------------------------------------------------> ", encryptedAESKey);
-        console.log("Access token -------------------------------------------------------------------> ", accessToken);
-        console.log("Encrypted data for body ---------------------------------------------------> ", encryptionResult.encodedData);
+        console.log("The secret val ------------------------------------------------------> ", encryptedAESKey);
+        console.log("Access token --------------------------------------------------------> ", accessToken);
+        console.log("Encrypted data for body ---------------------------------------------> ", encryptionResult.encodedData);
         console.log("Sign ----------------------------------------------------------------> ", encryptionResult.digitalSignature);
-
 
 
         // API call 
@@ -611,45 +489,30 @@ export const fileEbrcService = async (payload) => {
                     "client_id": clientId,
                     "secretVal": encryptedAESKey,
                 },
-                timeout: 30000,
+                // timeout: 30000,
             }
         );
 
-        if (response.status !== 200) {
+        const { status, statusText, headers, pragma } = await response.data;
 
-            console.error("Status Code:", response.status);
-            console.error("Status Text:", response.statusText);
 
-            const status = response.status.toString();
-            const errorMsg = ERROR_CODES[status] || response.data?.message || `HTTP ${response.status}`;
-
-            if (response.status === 403) {
-                console.error("403 Access forbidden !");
-
-            }
-            throw new Error(`eBRC filing failed: ${errorMsg}`);
+        if (status === 201 || status === 200) {
+            return response.status(status).json({
+                success: true,
+                message: "eBRC data has been successfully posted"
+            })
         }
 
-        // Step 7: Decrypt and verify response - CORRECTED
-        console.log("Decrypting and verifying response...");
-        const decryptedData = decryptResponse(response.data, encryptionResult.secretPlain, encryptionResult.saltString);
-
-        console.log("=== eBRC FILING SUCCESSFUL ===");
-        return {
-            success: true,
-            messageID: messageID,
-            data: decryptedData,
-            message: "eBRC data filed successfully with DGFT",
-            timestamp: new Date().toISOString(),
-            systemIP: systemIP.ip
-        };
-
+        if (status === 403) {
+            console.log({
+                "Status": status,
+                "Status Text ": statusText,
+                "headers": headers
+            })
+            throw new Error(`Status code -> ${status} , Status text -> ${statusText}`);
+        }
     } catch (error) {
         console.error("=== eBRC FILING ERROR ===");
-
-        if (error.response.status === 403) {
-            throw new Error("403 Access forbidden - Access forbidden, please verify the IP, client Id and client secret");
-        }
         throw new Error(`eBRC filing failed: ${error.message}`);
     }
 };     
