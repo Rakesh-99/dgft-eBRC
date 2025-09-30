@@ -244,16 +244,15 @@ async function encryptPayload(payload) {
 
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
+    // Step 5: Sign the BASE64 JSON (before encryption)
+    const digitalSignature = createDigitalSignature(payloadBase64);
+
     // Step 3: Generate 32-char secret key and salt string  . calling the helper fn() --------> 
     const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
     console.log("3. Secret key and salt generated", { "secret plain": secretPlain, "salt": saltString });
 
     // step 4 : calling the helper fn() to encrypt the payload using AES-GCM ------> 
     const { finalBuffer, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
-
-
-    // Step 5: Sign the BASE64 JSON (before encryption)
-    const digitalSignature = createDigitalSignature(payloadBase64);
 
 
     console.log("Encryption completed successfully");
