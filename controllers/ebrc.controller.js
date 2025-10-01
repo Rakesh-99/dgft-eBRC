@@ -3,6 +3,7 @@ import expressAsyncHandler from 'express-async-handler';
 import {
     fileEbrcService,
     getSandboxToken,
+    generateEbrcCurlParams
 
 } from "../services/ebrc.service.js";
 
@@ -23,6 +24,38 @@ export const getToken = async (req, res) => {
         });
     }
 };
+
+
+
+// gen ebrc cur; fn() for getting encrypted values :
+export const generateCurlValues = async (req, res) => {
+    try {
+        const payload = req.body;
+
+        // Call the service function to generate cURL parameters
+        const curlParams = await generateEbrcCurlParams(payload);
+
+        return res.json({
+            success: true,
+            data: curlParams,
+            message: "cURL parameters generated successfully"
+        });
+    } catch (error) {
+        console.error("Controller error:", error.message);
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+}
+
+
+
+
+
+
+
+
 
 // Main eBRC filing function
 export const fileEbrc = async (req, res) => {
@@ -49,20 +82,16 @@ export const fileEbrc = async (req, res) => {
         } else {
             console.log("Response ------------------------------------------>", response);
 
-            return res.status(response.httpStatus).json({
+            return res.status(403).json({
                 success: response.success,
                 message: response.error || "Failed to file eBRC",
                 details: response.headers || response.data || null
             });
         }
     } catch (error) {
-        console.error("=== CONTROLLER ERROR ===", error);
-        console.error("Error message:", error.message);
-
-        return res.status(error.httpStatus).json({
-            success: error.response?.status === 400 ? 400 : 500,
-            message: error.message,
-            details: error.response?.data
+        return res.status(500).json({
+            success: false,
+            message: error.message || "Internal Server Error"
         });
     }
 };
