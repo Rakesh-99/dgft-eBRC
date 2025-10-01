@@ -232,10 +232,10 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
 }
 
 // step 5:  Digital signature helper fn() ------> 
-function createDigitalSignature(payloadBase64) {
+function createDigitalSignature(encryptedData) {
     try {
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(payloadBase64, 'utf8');  // Sign the Base64 encoded JSON (Step 2 output)
+        signer.update(encryptedData, 'utf8');  // Sign the encrypted data
         const signature = signer.sign(userPrivateKey, "base64");
         return signature;
     } catch (error) {
@@ -265,7 +265,7 @@ async function encryptPayload(payload) {
     const { finalBuffer, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
 
 
-    // Step 5: Sign the BASE64 JSON (before encryption)
+    // Step 5: Sign the encrypted data
     const digitalSignature = createDigitalSignature(finalBuffer);
 
 
