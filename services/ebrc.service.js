@@ -210,12 +210,14 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
 
         const authTag = cipher.getAuthTag();
 
+
+        const cipherTextWithTag = Buffer.concat([encrypted, authTag]);
+
         // Step 4: Combine IV + Salt + Encrypted + AuthTag
         const finalBuffer = Buffer.concat([
             iv,                          // 12 bytes
             saltBytes,                   // 32 bytes
-            encrypted,                   // encrypted data
-            authTag                      // 16 bytes
+            cipherTextWithTag            // 16 bytes
         ]);
 
         return {
