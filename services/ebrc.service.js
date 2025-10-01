@@ -488,6 +488,48 @@ function validatePayload(payload) {
     console.log("Payload validation successful");
 }
 
+
+// Generate encrypted values for curl command : 
+export const generateEbrcCurlParams = async (payload) => {
+    try {
+        // Validate payload
+        validatePayload(payload);
+
+        // Get access token
+        const tokenResponse = await getSandboxToken();
+        const accessToken = tokenResponse.data.accessToken;
+
+        // Encrypt payload
+        const encryptionResult = await encryptPayload(payload);
+
+        // Encrypt AES key
+        const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+
+        // Generate messageID
+        const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
+
+        // Print all values for cURL
+        console.log("=== COPY THESE VALUES FOR YOUR CURL COMMAND ===");
+        console.log("accessToken:", accessToken);
+        console.log("secretVal:", encryptedAESKey);
+        console.log("messageID:", messageID);
+        console.log("data:", encryptionResult.encodedData);
+        console.log("sign:", encryptionResult.digitalSignature);
+
+        // Return as object if you want to use programmatically
+        return {
+            accessToken,
+            secretVal: encryptedAESKey,
+            messageID,
+            data: encryptionResult.encodedData,
+            sign: encryptionResult.digitalSignature
+        };
+    } catch (error) {
+        console.error("Error generating cURL params:", error.message);
+        throw error;
+    }
+};
+
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
