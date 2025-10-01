@@ -292,7 +292,6 @@ function encryptAESKey(secretPlain) {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: 'sha256',
-                mgf: crypto.constants.RSA_MGF1
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
@@ -481,6 +480,48 @@ function validatePayload(payload) {
     console.log("Payload validation successful");
 }
 
+
+// Generate encrypted values for curl command : 
+export const generateEbrcCurlParams = async (payload) => {
+    try {
+        // Validate payload
+        validatePayload(payload);
+
+        // Get access token
+        const tokenResponse = await getSandboxToken();
+        const accessToken = tokenResponse.data.accessToken;
+
+        // Encrypt payload
+        const encryptionResult = await encryptPayload(payload);
+
+        // Encrypt AES key
+        const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+
+        // Generate messageID
+        const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
+
+
+        console.log("=== COPY THESE VALUES FOR YOUR CURL COMMAND ===");
+        console.log("accessToken:", accessToken);
+        console.log("secretVal:", encryptedAESKey);
+        console.log("messageID:", messageID);
+        console.log("data:", encryptionResult.encodedData);
+        console.log("sign:", encryptionResult.digitalSignature);
+
+
+        return {
+            accessToken,
+            secretVal: encryptedAESKey,
+            messageID,
+            data: encryptionResult.encodedData,
+            sign: encryptionResult.digitalSignature
+        };
+    } catch (error) {
+        console.error("Error generating cURL params:", error.message);
+        throw error;
+    }
+};
+
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
@@ -520,8 +561,6 @@ export const fileEbrcService = async (payload) => {
                     "accessToken": accessToken,
                     "client_id": clientId,
                     "secretVal": encryptedAESKey,
-                    "messageID": messageID,
-                    "x-api-key": apiKey
                 },
                 // timeout: 30000,
             }
