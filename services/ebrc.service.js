@@ -192,32 +192,25 @@ async function generateDynamic32CharSecretPair() {
 
 // setp 4 : AES-GCM encryption helper fn() :
 async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
-
     try {
-        // Step 1: Generate AES 256-bit key using PBKDF2 
         const saltBytes = Buffer.from(saltString, 'utf8');
         const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
-
-        // Step 2: Generate 12 bytes random IV
         const iv = crypto.randomBytes(12);
 
-        // Step 3: Encrypt using AES-256-GCM
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
-
-        let encrypted = cipher.update(payloadBase64, 'base64');
-        const final = cipher.final();
-        encrypted = Buffer.concat([encrypted, final]);
+        let encrypted = cipher.update(payloadBase64, 'utf8');
+        encrypted = Buffer.concat([encrypted, cipher.final()]);
 
         const authTag = cipher.getAuthTag();
 
+        // Append AuthTag to ciphertext 
+        const encryptedWithTag = Buffer.concat([encrypted, authTag]);
 
-        const cipherTextWithTag = Buffer.concat([encrypted, authTag]);
-
-        // Step 4: Combine IV + Salt + Encrypted + AuthTag
+        // Concatenate IV + Salt + (Ciphertext + AuthTag)
         const finalBuffer = Buffer.concat([
-            saltBytes,
-            iv,
-            cipherTextWithTag
+            iv,                          // 12 bytes
+            saltBytes,                   // 32 bytes
+            encryptedWithTag             // ciphertext + tag
         ]);
 
         return {
@@ -232,10 +225,10 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
 }
 
 // step 5:  Digital signature helper fn() ------> 
-function createDigitalSignature(encryptedData) {
+function createDigitalSignature(payloadBase64) {
     try {
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(encryptedData, 'base64');  // Sign the encrypted data
+        signer.update(payloadBase64, 'utf8');  // Sign the Base64 encoded JSON (Step 2 output)
         const signature = signer.sign(userPrivateKey, "base64");
         return signature;
     } catch (error) {
@@ -265,7 +258,7 @@ async function encryptPayload(payload) {
     const { finalBuffer, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
 
 
-    // Step 5: Sign the encrypted data
+    // Step 5: Sign the BASE64 JSON (before encryption)
     const digitalSignature = createDigitalSignature(finalBuffer);
 
 
@@ -299,6 +292,7 @@ function encryptAESKey(secretPlain) {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: 'sha256',
+                mgf: crypto.constants.RSA_MGF1
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
@@ -487,48 +481,6 @@ function validatePayload(payload) {
     console.log("Payload validation successful");
 }
 
-
-// Generate encrypted values for curl command : 
-export const generateEbrcCurlParams = async (payload) => {
-    try {
-        // Validate payload
-        validatePayload(payload);
-
-        // Get access token
-        const tokenResponse = await getSandboxToken();
-        const accessToken = tokenResponse.data.accessToken;
-
-        // Encrypt payload
-        const encryptionResult = await encryptPayload(payload);
-
-        // Encrypt AES key
-        const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
-
-        // Generate messageID
-        const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
-
-        // Print all values for cURL
-        console.log("=== COPY THESE VALUES FOR YOUR CURL COMMAND ===");
-        console.log("accessToken:", accessToken);
-        console.log("secretVal:", encryptedAESKey);
-        console.log("messageID:", messageID);
-        console.log("data:", encryptionResult.encodedData);
-        console.log("sign:", encryptionResult.digitalSignature);
-
-        // Return as object if you want to use programmatically
-        return {
-            accessToken,
-            secretVal: encryptedAESKey,
-            messageID,
-            data: encryptionResult.encodedData,
-            sign: encryptionResult.digitalSignature
-        };
-    } catch (error) {
-        console.error("Error generating cURL params:", error.message);
-        throw error;
-    }
-};
-
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
@@ -548,6 +500,14 @@ export const fileEbrcService = async (payload) => {
         // Generate messageID
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
 
+
+
+        console.log("The secret val ------------------------------------------------------> ", encryptedAESKey);
+        console.log("Access token --------------------------------------------------------> ", accessToken);
+        console.log("Encrypted data for body ---------------------------------------------> ", encryptionResult.encodedData);
+        console.log("Sign ----------------------------------------------------------------> ", encryptionResult.digitalSignature);
+
+
         // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
             {
@@ -560,10 +520,13 @@ export const fileEbrcService = async (payload) => {
                     "accessToken": accessToken,
                     "client_id": clientId,
                     "secretVal": encryptedAESKey,
+                    "messageID": messageID,
+                    "x-api-key": apiKey
                 },
-                timeout: 30000,
+                // timeout: 30000,
             }
         );
+
         if (response.status === 200 || response.status === 201) {
             console.log("=== SUCCESS ===");
             console.log("Response Data:", response.data);
