@@ -204,7 +204,7 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
         // Step 3: Encrypt using AES-256-GCM
         const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
 
-        let encrypted = cipher.update(payloadBase64, 'utf8');
+        let encrypted = cipher.update(payloadBase64, 'base64');
         const final = cipher.final();
         encrypted = Buffer.concat([encrypted, final]);
 
@@ -215,9 +215,9 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
 
         // Step 4: Combine IV + Salt + Encrypted + AuthTag
         const finalBuffer = Buffer.concat([
-            iv,                          // 12 bytes
-            saltBytes,                   // 32 bytes
-            cipherTextWithTag            // 16 bytes
+            saltBytes,
+            iv,
+            cipherTextWithTag
         ]);
 
         return {
@@ -235,7 +235,7 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
 function createDigitalSignature(encryptedData) {
     try {
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(encryptedData, 'utf8');  // Sign the encrypted data
+        signer.update(encryptedData, 'base64');  // Sign the encrypted data
         const signature = signer.sign(userPrivateKey, "base64");
         return signature;
     } catch (error) {
@@ -299,7 +299,6 @@ function encryptAESKey(secretPlain) {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: 'sha256',
-                mgf: crypto.constants.RSA_MGF1
             },
             Buffer.from(secretPlain, 'utf8')
         ).toString('base64');
@@ -549,14 +548,6 @@ export const fileEbrcService = async (payload) => {
         // Generate messageID
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
 
-
-
-        console.log("The secret val ------------------------------------------------------> ", encryptedAESKey);
-        console.log("Access token --------------------------------------------------------> ", accessToken);
-        console.log("Encrypted data for body ---------------------------------------------> ", encryptionResult.encodedData);
-        console.log("Sign ----------------------------------------------------------------> ", encryptionResult.digitalSignature);
-
-
         // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
             {
@@ -569,13 +560,10 @@ export const fileEbrcService = async (payload) => {
                     "accessToken": accessToken,
                     "client_id": clientId,
                     "secretVal": encryptedAESKey,
-                    "messageID": messageID,
-                    "x-api-key": apiKey
                 },
-                // timeout: 30000,
+                timeout: 30000,
             }
         );
-
         if (response.status === 200 || response.status === 201) {
             console.log("=== SUCCESS ===");
             console.log("Response Data:", response.data);
