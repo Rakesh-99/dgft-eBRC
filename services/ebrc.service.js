@@ -115,6 +115,10 @@ export const validateEnvironmentSetup = () => {
 // Generating accesstoken : -----> 
 export const getSandboxToken = async () => {
     try {
+        if (!clientSecret || !clientId || !apiKey || !accessTokenBaseUrl) {
+            throw new Error("Missing CLIENT_SECRET / CLIENT_ID / X_API_KEY / ACCESS_TOKEN_URL env");
+        }
+
         // Generate 32-byte random salt
         const salt = crypto.randomBytes(32);
 
@@ -130,13 +134,18 @@ export const getSandboxToken = async () => {
         // Final secret = base64(salt + derivedKey)
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
-        // Send request
+        // Build token endpoint. If accessTokenBaseUrl already includes path, this still works if
+        // you set ACCESS_TOKEN_URL correctly. Best practice: set ACCESS_TOKEN_URL to base URL (no path).
+        const tokenUrl = accessTokenBaseUrl.endsWith("/getAccessToken")
+            ? accessTokenBaseUrl
+            : `${accessTokenBaseUrl.replace(/\/$/, "")}/getAccessToken`;
+
         const response = await axios.post(
-            `${accessTokenBaseUrl}/getAccessToken`,
-            JSON.stringify({
+            tokenUrl,
+            {
                 client_id: clientId,
                 client_secret: finalSecret,
-            }),
+            },
             {
                 headers: {
                     "Content-Type": "application/json",
@@ -145,13 +154,26 @@ export const getSandboxToken = async () => {
             }
         );
 
-        console.log("Token generated successfully:", response.data);
-        return response.data;
+        if (!response || !response.data) {
+            throw new Error("Empty response from getAccessToken");
+        }
+
+        // Expect response.data.accessToken (as per DGFT doc). Return normalized object.
+        const accessToken = response.data.accessToken || response.data.access_token || null;
+        if (!accessToken) {
+            // print non-secret parts for debugging
+            console.error("getAccessToken response shape:", Object.keys(response.data));
+            throw new Error("Access token missing in response from DGFT");
+        }
+
+        console.log("Token generated successfully (length):", accessToken.length);
+        return { accessToken };   // normalized return
     } catch (error) {
-        console.error("Error while getting token:", error.response?.data || error);
-        throw new Error(`Authentication failed: ${error}`);
+        console.error("Error while getting token:", error.response?.data || error.message || error);
+        throw new Error(`Authentication failed: ${error.message || error}`);
     }
 };
+
 
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
@@ -176,40 +198,48 @@ function generateDynamic32CharSecretKey() {
 
 // Step 4: Generate 32 bytes salt and create AES key helper fn() :
 function generateSaltAndAESKey(secretKey) {
-    // Generate 32 bytes random salt
+    // 32 bytes random salt
     const salt = crypto.randomBytes(32);
 
-    // Create AES 256-bit key by salting secret key with salt using SHA256
-    const aes256Key = crypto.createHash('sha256')
-        .update(secretKey + salt.toString('utf8'))
-        .digest();
+    // secretKey is the 32-char dynamic keyboard string from Step 3
+    const secretKeyBuf = Buffer.from(secretKey, 'utf8');       // raw bytes of secretKey
+    const combined = Buffer.concat([secretKeyBuf, salt]);      // secretKey_bytes || salt_bytes
 
-    console.log("Generated 32-byte salt and AES key using SHA256");
+    // AES 256-bit key is SHA256(secretKey_bytes || salt_bytes)
+    const aes256Key = crypto.createHash('sha256').update(combined).digest(); // 32 bytes
+
+    if (aes256Key.length !== 32) throw new Error("AES key derivation failed");
+
+    console.log("Generated salt (bytes):", salt.length, "AES key length:", aes256Key.length);
     return { salt, aes256Key };
 }
 
 
 
+
+
 // setp 4 : AES-GCM encryption helper fn() :
-async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
+async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt, secretKey) {
     try {
-        // 12 bytes IV
-        const iv = crypto.randomBytes(12);
+        // IV must be first 12 bytes of the "Secret Key" per spec.
+        const secretKeyBuf = Buffer.from(secretKey, 'utf8');
+        if (secretKeyBuf.length < 12) throw new Error("Secret key too short to derive IV");
+        const iv = secretKeyBuf.slice(0, 12); // 12 bytes IV derived from secretKey
 
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
-        // Input is the base64 encoded JSON string (payloadBase64)
-        const encryptedPart1 = cipher.update(payloadBase64, 'utf8'); // Buffer
-        const encryptedPart2 = cipher.final(); // Buffer
-        const encrypted = Buffer.concat([encryptedPart1, encryptedPart2]);
 
-        //  get GCM auth tag
-        const authTag = cipher.getAuthTag(); // Buffer (16 bytes)
+        // Input is the base64 encoded JSON string
+        const enc1 = cipher.update(payloadBase64, 'utf8');
+        const enc2 = cipher.final();
+        const encrypted = Buffer.concat([enc1, enc2]);
 
-        // Final structure expected by doc: IV(12) + SALT(32) + ENCRYPTED + AUTH_TAG
+        const authTag = cipher.getAuthTag(); // 16 bytes (GCM tag)
+
+        //  IV(12) + SALT(32) + ENCRYPTED + AUTH_TAG(16)
         const finalBuffer = Buffer.concat([iv, salt, encrypted, authTag]);
 
         return {
-            finalBuffer: finalBuffer.toString('base64'), // this becomes "data"
+            finalBuffer: finalBuffer.toString('base64'),
             iv,
             salt,
             encrypted,
@@ -219,6 +249,7 @@ async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
         throw new Error(`AES-GCM encryption failed: ${error.message}`);
     }
 }
+
 
 
 // step 5:  Digital signature helper fn() ------> 
@@ -250,7 +281,7 @@ async function encryptPayload(payload) {
 
     // Step 4: Generate salt and AES key, then encrypt
     const { salt, aes256Key } = generateSaltAndAESKey(secretKey);
-    const { finalBuffer, iv, authTag } = await encryptPayloadAESGCM(payloadBase64, aes256Key, salt);
+    const { finalBuffer, iv } = await encryptPayloadAESGCM(payloadBase64, aes256Key, salt, secretKey);
     console.log("4. Encrypted payload using AES-256-GCM");
 
     // Step 5: Sign the Base64 JSON (before encryption)
@@ -483,8 +514,7 @@ export const generateEbrcCurlParams = async (payload) => {
         validatePayload(payload);
 
         // Get access token
-        const tokenResponse = await getSandboxToken();
-        const accessToken = tokenResponse.accessToken;
+        const { accessToken } = await getSandboxToken();
 
         // Encrypt payload
         const encryptionResult = await encryptPayload(payload);
@@ -525,8 +555,7 @@ export const fileEbrcService = async (payload) => {
         validatePayload(payload);
 
         // Step 4: Get access token (valid for 5 minutes)
-        const tokenResponse = await getSandboxToken();
-        const accessToken = tokenResponse.accessToken;
+        const { accessToken } = await getSandboxToken();
 
         // Steps 1-5: Encryption and signature process 
         const encryptionResult = await encryptPayload(payload);
@@ -546,12 +575,12 @@ export const fileEbrcService = async (payload) => {
             {
                 headers: {
                     "Content-Type": "application/json",
+                    "x-api-key": apiKey,
                     "accessToken": accessToken,
                     "client_id": clientId,
                     "secretVal": encryptedAESKey,
-                    messageId: messageID
-
-                },
+                    "messageID": messageID
+                }
                 // timeout: 30000,
             }
         );
