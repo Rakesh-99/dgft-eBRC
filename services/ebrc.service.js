@@ -259,7 +259,7 @@ async function encryptPayload(payload) {
 
 
     // Step 5: Sign the BASE64 JSON (before encryption)
-    const digitalSignature = createDigitalSignature(finalBuffer);
+    const digitalSignature = createDigitalSignature(payloadBase64);
 
 
     console.log("Encryption completed successfully");
