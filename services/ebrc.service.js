@@ -200,14 +200,15 @@ function generateSaltAndAESKey(secretKey) {
     // Generate 32 bytes random salt
     const salt = crypto.randomBytes(32);
 
-    const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
-    const combined = Buffer.concat([secretKeyBuffer, salt]);
+    // Use PBKDF2 with 65536 iterations 
+    const aes256Key = crypto.pbkdf2Sync(
+        secretKey,
+        salt,
+        65536,
+        32,
+        'sha256'
+    );
 
-    const aes256Key = crypto.createHash('sha256').update(combined).digest();
-
-    if (aes256Key.length !== 32) throw new Error("AES key derivation failed");
-
-    console.log("Generated salt (bytes):", salt.length, "AES key length:", aes256Key.length);
     return { salt, aes256Key };
 }
 
@@ -277,7 +278,7 @@ async function encryptPayload(payload) {
     console.log("4. Encrypted payload using AES-256-GCM");
 
     // Step 5: Sign the Base64 JSON (before encryption)
-    const digitalSignature = createDigitalSignature(finalBuffer);
+    const digitalSignature = createDigitalSignature(payloadBase64);
     console.log("5. Created digital signature");
 
     console.log("Encryption completed successfully");
