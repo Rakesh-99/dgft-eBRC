@@ -143,60 +143,57 @@ export const getSandboxToken = async () => {
 };
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
-async function generateDynamic32CharSecretPair() {
-    // Generate secret key using keyboard characters
+async function generateDynamic32CharSecretKey() {
     const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?';
-
-    let secretPlain = '';
+    let secretKey = '';
     for (let i = 0; i < 32; i++) {
         const randomIndex = Math.floor(Math.random() * keyboardChars.length);
-        secretPlain += keyboardChars[randomIndex];
+        secretKey += keyboardChars[randomIndex];
     }
+    console.log("Generated secret key:", secretKey);
+    return { secretKey };
+}
 
-    // Generate salt string (32 characters)
-    let saltString = '';
-    for (let i = 0; i < 32; i++) {
-        const randomIndex = Math.floor(Math.random() * keyboardChars.length);
-        saltString += keyboardChars[randomIndex];
-    }
 
-    console.log("Generated secret key:", secretPlain);
-    console.log("Generated salt string:", saltString);
+// Step 4: Generate 32 bytes salt and create AES key helper fn() :
+function generateSaltAndAESKey(secretKey) {
+    // Generate 32 bytes random salt
+    const salt = crypto.randomBytes(32);
 
-    return { secretPlain, saltString };
+    // Create AES 256-bit key by salting secret key with salt using SHA256
+    const aes256Key = crypto.createHash('sha256')
+        .update(secretKey + salt.toString('hex'))
+        .digest();
+
+    console.log("Generated 32-byte salt and AES key using SHA256");
+    return { salt, aes256Key };
 }
 
 
 
-
 // setp 4 : AES-GCM encryption helper fn() :
-async function encryptPayloadAESGCM(payloadBase64, secretKey, saltString) {
+async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
     try {
-        const saltBytes = Buffer.from(saltString, 'utf8');
-        const aesKey = crypto.pbkdf2Sync(secretKey, saltBytes, 65536, 32, 'sha256');
+        // Generate 12 bytes random IV as specified
         const iv = crypto.randomBytes(12);
 
-        const cipher = crypto.createCipheriv('aes-256-gcm', aesKey, iv);
+        const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
         let encrypted = cipher.update(payloadBase64, 'utf8');
         encrypted = Buffer.concat([encrypted, cipher.final()]);
 
-        const authTag = cipher.getAuthTag();
+        // Final structure as per DGFT docs: 12 bytes IV + 32 bytes salt + encrypted message
 
-        // Append AuthTag to ciphertext 
-        const encryptedWithTag = Buffer.concat([encrypted, authTag]);
-
-        // Concatenate IV + Salt + (Ciphertext + AuthTag)
         const finalBuffer = Buffer.concat([
-            iv,                          // 12 bytes
-            saltBytes,                   // 32 bytes
-            encryptedWithTag             // ciphertext + tag
+            iv,                    // 12 bytes IV
+            salt,                  // 32 bytes salt
+            encrypted              // encrypted message only (without AuthTag)
         ]);
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
             iv,
-            authTag,
-            aesKey
+            salt,
+            encrypted
         };
     } catch (error) {
         throw new Error(`AES-GCM encryption failed: ${error.message}`);
@@ -218,38 +215,36 @@ function createDigitalSignature(payloadBase64) {
 
 //  encryption process 
 async function encryptPayload(payload) {
-
     // Step 1: Create JSON
-    console.log("Encryption start -------------------> ");
     const payloadJson = JSON.stringify(payload);
-    console.log("1. JSON payload created", payloadJson);
+    console.log("1. JSON payload created");
 
     // Step 2: Base64 encode JSON
     const payloadBase64 = Buffer.from(payloadJson).toString('base64');
-
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
-    // Step 3: Generate 32-char secret key and salt string  . calling the helper fn() --------> 
-    const { secretPlain, saltString } = await generateDynamic32CharSecretPair();
-    console.log("3. Secret key and salt generated", { "secret plain": secretPlain, "salt": saltString });
+    // Step 3: Generate 32-char secret key
+    const { secretKey } = await generateDynamic32CharSecretKey();
+    console.log("3. Generated 32-character secret key");
 
-    // step 4 : calling the helper fn() to encrypt the payload using AES-GCM ------> 
-    const { finalBuffer, iv, authTag, aesKey } = await encryptPayloadAESGCM(payloadBase64, secretPlain, saltString);
+    // Step 4: Generate salt and AES key, then encrypt
+    const { salt, aes256Key } = generateSaltAndAESKey(secretKey);
+    const { finalBuffer, iv } = await encryptPayloadAESGCM(payloadBase64, aes256Key, salt);
+    console.log("4. Encrypted payload using AES-256-GCM");
 
-
-    // Step 5: Sign the BASE64 JSON (before encryption)
+    // Step 5: Sign the Base64 JSON (before encryption)
     const digitalSignature = createDigitalSignature(payloadBase64);
-
+    console.log("5. Created digital signature");
 
     console.log("Encryption completed successfully");
 
     return {
-        secretPlain,
+        secretKey,
         encodedData: finalBuffer,
         digitalSignature,
         payloadBase64,
-        saltString,
-        aesKey,
+        salt,
+        aes256Key,
         iv
     };
 }
@@ -257,7 +252,7 @@ async function encryptPayload(payload) {
 
 
 // Encrypt secret key using DGFT public key with RSA
-function encryptAESKey(secretPlain) {
+function encryptAESKey(secretKey) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 6) ===");
 
@@ -272,7 +267,7 @@ function encryptAESKey(secretPlain) {
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: 'sha256',
             },
-            Buffer.from(secretPlain, 'utf8')
+            Buffer.from(secretKey, 'utf8')
         ).toString('base64');
 
         console.log("Secret key encrypted using RSA-OAEP-SHA256");
@@ -474,7 +469,7 @@ export const generateEbrcCurlParams = async (payload) => {
         const encryptionResult = await encryptPayload(payload);
 
         // Encrypt AES key
-        const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+        const encryptedAESKey = encryptAESKey(encryptionResult.secretKey);
 
         // Generate messageID
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
@@ -515,17 +510,10 @@ export const fileEbrcService = async (payload) => {
         // Steps 1-5: Encryption and signature process 
         const encryptionResult = await encryptPayload(payload);
 
-        const encryptedAESKey = encryptAESKey(encryptionResult.secretPlain);
+        const encryptedAESKey = encryptAESKey(encryptionResult.secretKey);
 
         // Generate messageID
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
-
-
-
-        console.log("The secret val ------------------------------------------------------> ", encryptedAESKey);
-        console.log("Access token --------------------------------------------------------> ", accessToken);
-        console.log("Encrypted data for body ---------------------------------------------> ", encryptionResult.encodedData);
-        console.log("Sign ----------------------------------------------------------------> ", encryptionResult.digitalSignature);
 
 
         // API call 
