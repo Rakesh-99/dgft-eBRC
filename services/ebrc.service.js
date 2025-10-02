@@ -134,8 +134,7 @@ export const getSandboxToken = async () => {
         // Final secret = base64(salt + derivedKey)
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
-        // Build token endpoint. If accessTokenBaseUrl already includes path, this still works if
-        // you set ACCESS_TOKEN_URL correctly. Best practice: set ACCESS_TOKEN_URL to base URL (no path).
+        // Build token endpoint. 
         const tokenUrl = accessTokenBaseUrl.endsWith("/getAccessToken")
             ? accessTokenBaseUrl
             : `${accessTokenBaseUrl.replace(/\/$/, "")}/getAccessToken`;
@@ -246,10 +245,10 @@ async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
 
 
 // step 5:  Digital signature helper fn() ------> 
-function createDigitalSignature(payloadBase64) {
+function createDigitalSignature(dataToSign) {
     try {
         const signer = crypto.createSign("RSA-SHA256");
-        signer.update(payloadBase64, 'utf8');  // Sign the Base64 encoded JSON (Step 2 output)
+        signer.update(dataToSign, 'utf8');  // Sign the Base64 encoded JSON (Step 2 output)
         const signature = signer.sign(userPrivateKey, "base64");
         return signature;
     } catch (error) {
@@ -278,7 +277,7 @@ async function encryptPayload(payload) {
     console.log("4. Encrypted payload using AES-256-GCM");
 
     // Step 5: Sign the Base64 JSON (before encryption)
-    const digitalSignature = createDigitalSignature(payloadBase64);
+    const digitalSignature = createDigitalSignature(finalBuffer);
     console.log("5. Created digital signature");
 
     console.log("Encryption completed successfully");
