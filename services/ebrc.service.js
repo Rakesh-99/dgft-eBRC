@@ -144,47 +144,26 @@ export const getSandboxToken = async () => {
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
 async function generateDynamic32CharSecretPair() {
-    try {
-        const appName = "dgft";
-        const { ip } = await checkCurrentIP();
-        const timestamp = Date.now().toString();
+    // Generate secret key using keyboard characters
+    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?';
 
-        // Generate secret key
-        let secretPlain = `${appName}-${ip}${timestamp}`;
-
-        // Ensure exactly 32 characters with mixed padding
-        if (secretPlain.length > 32) {
-            secretPlain = secretPlain.substring(0, 32);
-        } else {
-            // Use mixed characters for padding instead of just "0"
-            const paddingChars = "0123456789abcdef";
-            while (secretPlain.length < 32) {
-                secretPlain += paddingChars[Math.floor(Math.random() * paddingChars.length)];
-            }
-        }
-
-        // Generate salt with more randomness
-        const randomOffset = Math.floor(Math.random() * 1000) + 100; // Random between 100-1099
-        const saltTimestamp = (parseInt(timestamp) + randomOffset).toString();
-        let saltString = `${appName}-${ip}${saltTimestamp}`;
-
-        // Ensure exactly 32 characters for salt
-        if (saltString.length > 32) {
-            saltString = saltString.substring(0, 32);
-        } else {
-            const saltPaddingChars = "abcdefghijklmnopqrstuvwxyz0123456789";
-            while (saltString.length < 32) {
-                saltString += saltPaddingChars[Math.floor(Math.random() * saltPaddingChars.length)];
-            }
-        }
-
-        console.log("Generated secret key:", secretPlain);
-        console.log("Generated salt string:", saltString);
-
-        return { secretPlain, saltString };
-    } catch (error) {
-        throw new Error(`Secret key generation failed: ${error.message}`);
+    let secretPlain = '';
+    for (let i = 0; i < 32; i++) {
+        const randomIndex = Math.floor(Math.random() * keyboardChars.length);
+        secretPlain += keyboardChars[randomIndex];
     }
+
+    // Generate salt string (32 characters)
+    let saltString = '';
+    for (let i = 0; i < 32; i++) {
+        const randomIndex = Math.floor(Math.random() * keyboardChars.length);
+        saltString += keyboardChars[randomIndex];
+    }
+
+    console.log("Generated secret key:", secretPlain);
+    console.log("Generated salt string:", saltString);
+
+    return { secretPlain, saltString };
 }
 
 
