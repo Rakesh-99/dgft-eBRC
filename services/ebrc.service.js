@@ -198,15 +198,13 @@ function generateDynamic32CharSecretKey() {
 
 // Step 4: Generate 32 bytes salt and create AES key helper fn() :
 function generateSaltAndAESKey(secretKey) {
-    // 32 bytes random salt
+    // Generate 32 bytes random salt
     const salt = crypto.randomBytes(32);
 
-    // secretKey is the 32-char dynamic keyboard string from Step 3
-    const secretKeyBuf = Buffer.from(secretKey, 'utf8');       // raw bytes of secretKey
-    const combined = Buffer.concat([secretKeyBuf, salt]);      // secretKey_bytes || salt_bytes
+    const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
+    const combined = Buffer.concat([secretKeyBuffer, salt]);
 
-    // AES 256-bit key is SHA256(secretKey_bytes || salt_bytes)
-    const aes256Key = crypto.createHash('sha256').update(combined).digest(); // 32 bytes
+    const aes256Key = crypto.createHash('sha256').update(combined).digest();
 
     if (aes256Key.length !== 32) throw new Error("AES key derivation failed");
 
@@ -216,26 +214,21 @@ function generateSaltAndAESKey(secretKey) {
 
 
 
-
-
 // setp 4 : AES-GCM encryption helper fn() :
-async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt, secretKey) {
+async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
     try {
-        // IV must be first 12 bytes of the "Secret Key" per spec.
-        const secretKeyBuf = Buffer.from(secretKey, 'utf8');
-        if (secretKeyBuf.length < 12) throw new Error("Secret key too short to derive IV");
-        const iv = secretKeyBuf.slice(0, 12); // 12 bytes IV derived from secretKey
+        // Generate 12 bytes RANDOM IV
+        const iv = crypto.randomBytes(12); //  Random IV as per spec
 
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
 
-        // Input is the base64 encoded JSON string
         const enc1 = cipher.update(payloadBase64, 'utf8');
         const enc2 = cipher.final();
         const encrypted = Buffer.concat([enc1, enc2]);
 
-        const authTag = cipher.getAuthTag(); // 16 bytes (GCM tag)
+        const authTag = cipher.getAuthTag(); // 16 bytes GCM tag
 
-        //  IV(12) + SALT(32) + ENCRYPTED + AUTH_TAG(16)
+        // Final structure: IV(12) + SALT(32) + ENCRYPTED + AUTH_TAG(16)
         const finalBuffer = Buffer.concat([iv, salt, encrypted, authTag]);
 
         return {
