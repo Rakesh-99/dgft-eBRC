@@ -143,14 +143,21 @@ export const getSandboxToken = async () => {
 };
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
-async function generateDynamic32CharSecretKey() {
+function generateDynamic32CharSecretKey() {
     const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?';
+    const keyboardCharsLength = keyboardChars.length;
+
+    // Generate cryptographically secure random bytes (NOT Math.random())
+    const randomBytes = crypto.randomBytes(32);
+
     let secretKey = '';
     for (let i = 0; i < 32; i++) {
-        const randomIndex = Math.floor(Math.random() * keyboardChars.length);
+        // Use secure random bytes to select characters from keyboard set
+        const randomIndex = randomBytes[i] % keyboardCharsLength;
         secretKey += keyboardChars[randomIndex];
     }
-    console.log("Generated secret key:", secretKey);
+
+    console.log("Generated secret key using crypto.randomBytes:", secretKey);
     return { secretKey };
 }
 
@@ -224,7 +231,7 @@ async function encryptPayload(payload) {
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
     // Step 3: Generate 32-char secret key
-    const { secretKey } = await generateDynamic32CharSecretKey();
+    const { secretKey } = generateDynamic32CharSecretKey();
     console.log("3. Generated 32-character secret key");
 
     // Step 4: Generate salt and AES key, then encrypt
