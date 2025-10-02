@@ -114,43 +114,43 @@ export const validateEnvironmentSetup = () => {
 
 // Generating accesstoken : -----> 
 export const getSandboxToken = async () => {
-  try {
-    // Generate 32-byte random salt
-    const salt = crypto.randomBytes(32);
+    try {
+        // Generate 32-byte random salt
+        const salt = crypto.randomBytes(32);
 
-    // Derive PBKDF2 hash
-    const derivedKey = crypto.pbkdf2Sync(
-      clientSecret, 
-      salt,
-      65536,       
-      32,       
-      "sha256"
-    );
+        // Derive PBKDF2 hash
+        const derivedKey = crypto.pbkdf2Sync(
+            clientSecret,
+            salt,
+            65536,
+            32,
+            "sha256"
+        );
 
-    // Final secret = base64(salt + derivedKey)
-    const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
+        // Final secret = base64(salt + derivedKey)
+        const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
-    // Send request
-    const response = await axios.post(
-      `${accessTokenBaseUrl}/getAccessToken`,
-      JSON.stringify({
-        client_id: clientId,
-        client_secret: finalSecret,
-      }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
-      }
-    );
+        // Send request
+        const response = await axios.post(
+            `${accessTokenBaseUrl}/getAccessToken`,
+            JSON.stringify({
+                client_id: clientId,
+                client_secret: finalSecret,
+            }),
+            {
+                headers: {
+                    "Content-Type": "application/json",
+                    "x-api-key": apiKey,
+                },
+            }
+        );
 
-    console.log("Token generated successfully:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Error while getting token:", error.response?.data || error);
-    throw new Error(`Authentication failed: ${error}`);
-  }
+        console.log("Token generated successfully:", response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error while getting token:", error.response?.data || error);
+        throw new Error(`Authentication failed: ${error}`);
+    }
 };
 
 
@@ -484,7 +484,7 @@ export const generateEbrcCurlParams = async (payload) => {
 
         // Get access token
         const tokenResponse = await getSandboxToken();
-        const accessToken = tokenResponse.data.accessToken;
+        const accessToken = tokenResponse.accessToken;
 
         // Encrypt payload
         const encryptionResult = await encryptPayload(payload);
@@ -526,7 +526,7 @@ export const fileEbrcService = async (payload) => {
 
         // Step 4: Get access token (valid for 5 minutes)
         const tokenResponse = await getSandboxToken();
-        const accessToken = tokenResponse.data.accessToken;
+        const accessToken = tokenResponse.accessToken;
 
         // Steps 1-5: Encryption and signature process 
         const encryptionResult = await encryptPayload(payload);
