@@ -118,7 +118,6 @@ export const getSandboxToken = async () => {
         if (!clientSecret || !clientId || !apiKey || !accessTokenBaseUrl) {
             throw new Error("Missing CLIENT_SECRET / CLIENT_ID / X_API_KEY / ACCESS_TOKEN_URL env");
         }
-
         // Generate 32-byte random salt
         const salt = crypto.randomBytes(32);
 
@@ -134,13 +133,8 @@ export const getSandboxToken = async () => {
         // Final secret = base64(salt + derivedKey)
         const finalSecret = Buffer.concat([salt, derivedKey]).toString("base64");
 
-        // Build token endpoint. 
-        const tokenUrl = accessTokenBaseUrl.endsWith("/getAccessToken")
-            ? accessTokenBaseUrl
-            : `${accessTokenBaseUrl.replace(/\/$/, "")}/getAccessToken`;
-
         const response = await axios.post(
-            tokenUrl,
+            `${accessTokenBaseUrl}/getAccessToken`,
             {
                 client_id: clientId,
                 client_secret: finalSecret,
@@ -156,11 +150,9 @@ export const getSandboxToken = async () => {
         if (!response || !response.data) {
             throw new Error("Empty response from getAccessToken");
         }
-
-        // Expect response.data.accessToken (as per DGFT doc). Return normalized object.
-        const accessToken = response.data.accessToken || response.data.access_token || null;
+        const accessToken = response.data.accessToken
         if (!accessToken) {
-            // print non-secret parts for debugging
+
             console.error("getAccessToken response shape:", Object.keys(response.data));
             throw new Error("Access token missing in response from DGFT");
         }
@@ -177,30 +169,34 @@ export const getSandboxToken = async () => {
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
 function generateDynamic32CharSecretKey() {
-    const keyboardChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?';
-    const keyboardCharsLength = keyboardChars.length;
+    // prefix + timestamp + padding
+    const prefix = 'dgft';
+    const timestamp = Date.now().toString();
+    let secretKey = `${prefix}-${timestamp}`;
 
-    // Generate cryptographically secure random bytes (NOT Math.random())
-    const randomBytes = crypto.randomBytes(32);
-
-    let secretKey = '';
-    for (let i = 0; i < 32; i++) {
-        // Use secure random bytes to select characters from keyboard set
-        const randomIndex = randomBytes[i] % keyboardCharsLength;
-        secretKey += keyboardChars[randomIndex];
+    // Pad to exactly 32 characters
+    if (secretKey.length > 32) {
+        secretKey = secretKey.substring(0, 32);
+    } else {
+        // Pad with alphanumeric characters
+        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        while (secretKey.length < 32) {
+            secretKey += chars[Math.floor(Math.random() * chars.length)];
+        }
     }
 
-    console.log("Generated secret key using crypto.randomBytes:", secretKey);
+    console.log("Generated 32-char secret key:", secretKey);
     return { secretKey };
 }
 
 
 // Step 4: Generate 32 bytes salt and create AES key helper fn() :
 function generateSaltAndAESKey(secretKey) {
-    // Generate 32 bytes random salt
-    const salt = crypto.randomBytes(32);
+    //  deterministic salt from secret key 
+    const saltString = secretKey + 'salt' + Date.now().toString().slice(-8);
+    const salt = Buffer.from(saltString.padEnd(32, '0').slice(0, 32), 'utf8');
 
-    // Use PBKDF2 with 65536 iterations 
+    //  PBKDF2 with 65536 iterations 
     const aes256Key = crypto.pbkdf2Sync(
         secretKey,
         salt,
