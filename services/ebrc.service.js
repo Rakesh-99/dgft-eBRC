@@ -60,10 +60,18 @@ const VALID_PURPOSE_CODES = [
 // Utility: Check current public IP
 export const checkCurrentIP = async () => {
     try {
-        const response = await axios.get('https://api.ipify.org?format=json', { timeout: 5000 });
+        const response = await fetch('https://api.ipify.org?format=json', {
+            signal: AbortSignal.timeout(5000)
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
         console.log("=== CURRENT SYSTEM IP ===");
-        console.log("Public IP:", response.data.ip);
-        return response.data;
+        console.log("Public IP:", data.ip);
+        return data;
     } catch (error) {
         console.error("IP check failed:", error.message);
         return { ip: 'unknown' };
@@ -71,48 +79,7 @@ export const checkCurrentIP = async () => {
 };
 
 
-
-export const validateEnvironmentSetup = () => {
-    console.log("=== ENVIRONMENT VALIDATION ===");
-
-    const requiredEnvVars = {
-        'CLIENT_SECRET': clientSecret,
-        'DGFT_SANDBOX_URL': baseUrl,
-        'X_API_KEY': apiKey,
-        'CLIENT_ID': clientId,
-        'USER_PRIVATE_KEY': userPrivateKey,
-        'DGFT_PUBLIC_KEY': dgftPublicKey,
-        'ACCESS_TOKEN_URL': accessTokenBaseUrl
-    };
-
-    let hasErrors = false;
-
-    Object.entries(requiredEnvVars).forEach(([key, value]) => {
-        if (!value) {
-            console.error(` ${key} is missing or empty`);
-            hasErrors = true;
-        } else {
-            console.log(` ${key} is configured (length: ${value.length})`);
-        }
-    });
-
-    // Validate key formats
-    if (userPrivateKey) {
-        const hasPrivateKeyHeaders = userPrivateKey.includes('-----BEGIN') && userPrivateKey.includes('-----END');
-        console.log(`Private Key Format: ${hasPrivateKeyHeaders ? ' Valid' : ' Missing headers'}`);
-    }
-
-    if (dgftPublicKey) {
-        const hasPublicKeyHeaders = dgftPublicKey.includes('-----BEGIN') && dgftPublicKey.includes('-----END');
-        console.log(`DGFT Public Key Format: ${hasPublicKeyHeaders ? ' Valid' : ' Missing headers'}`);
-    }
-
-    return !hasErrors;
-};
-
-
-
-// Generating accesstoken : -----> 
+// Generating access token : ----->
 export const getSandboxToken = async () => {
     try {
         if (!clientSecret || !clientId || !apiKey || !accessTokenBaseUrl) {
@@ -168,18 +135,21 @@ export const getSandboxToken = async () => {
 
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
-function generateDynamic32CharSecretKey() {
-    // prefix + timestamp + padding
-    const prefix = 'dgft';
-    const timestamp = Date.now().toString();
-    let secretKey = `${prefix}-${timestamp}`;
+async function generateDynamic32CharSecretKey() {
 
-    // Pad to exactly 32 characters
+    const prefix = 'dgft-';
+    const timestamp = Date.now().toString();
+
+    // Create IP-like suffix (you could use actual IP if needed)
+    const { ip } = await checkCurrentIP();
+    let secretKey = `${prefix}${ip}${timestamp}`;
+
+    // Ensure exactly 32 characters
     if (secretKey.length > 32) {
         secretKey = secretKey.substring(0, 32);
     } else {
-        // Pad with alphanumeric characters
-        const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+        // Pad with numbers to match DGFT pattern
+        const chars = '0123456789';
         while (secretKey.length < 32) {
             secretKey += chars[Math.floor(Math.random() * chars.length)];
         }
@@ -190,13 +160,29 @@ function generateDynamic32CharSecretKey() {
 }
 
 
-// Step 4: Generate 32 bytes salt and create AES key helper fn() :
-function generateSaltAndAESKey(secretKey) {
-    //  deterministic salt from secret key 
-    const saltString = secretKey + 'salt' + Date.now().toString().slice(-8);
-    const salt = Buffer.from(saltString.padEnd(32, '0').slice(0, 32), 'utf8');
 
-    //  PBKDF2 with 65536 iterations 
+// Step 4: Generate 32 bytes salt and create AES key helper fn() :
+async function generateSaltAndAESKey(secretKey) {
+    // Generate salt similar to secret key but with slight variation
+    const prefix = 'dgft-';
+    const timestamp = (Date.now() + 1).toString(); // Slight variation
+    const { ip } = await checkCurrentIP();
+
+    let saltString = `${prefix}${ip}${timestamp}`;
+
+    // Ensure exactly 32 characters
+    if (saltString.length > 32) {
+        saltString = saltString.substring(0, 32);
+    } else {
+        const chars = '0123456789';
+        while (saltString.length < 32) {
+            saltString += chars[Math.floor(Math.random() * chars.length)];
+        }
+    }
+
+    const salt = Buffer.from(saltString, 'utf8');
+
+    // PBKDF2 with 65536 iterations 
     const aes256Key = crypto.pbkdf2Sync(
         secretKey,
         salt,
@@ -205,6 +191,7 @@ function generateSaltAndAESKey(secretKey) {
         'sha256'
     );
 
+    console.log("Generated salt string:", saltString);
     return { salt, aes256Key };
 }
 
