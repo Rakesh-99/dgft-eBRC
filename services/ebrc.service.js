@@ -211,8 +211,11 @@ async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
 
         const authTag = cipher.getAuthTag(); // 16 bytes GCM tag
 
+        const cypherTextWithTag = Buffer.concat([encrypted, authTag]);
+
+
         // Final structure: IV(12) + SALT(32) + ENCRYPTED + AUTH_TAG(16)
-        const finalBuffer = Buffer.concat([iv, salt, encrypted, authTag]);
+        const finalBuffer = Buffer.concat([iv, salt, cypherTextWithTag]);
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
