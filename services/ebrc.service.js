@@ -252,11 +252,11 @@ async function encryptPayload(payload) {
     console.log("2. Base64 encoded JSON:", payloadBase64.slice(0, 50) + "...");
 
     // Step 3: Generate 32-char secret key
-    const { secretKey } = generateDynamic32CharSecretKey();
+    const { secretKey } = await generateDynamic32CharSecretKey();
     console.log("3. Generated 32-character secret key");
 
     // Step 4: Generate salt and AES key, then encrypt
-    const { salt, aes256Key } = generateSaltAndAESKey(secretKey);
+    const { salt, aes256Key } = await generateSaltAndAESKey(secretKey);
     const { finalBuffer, iv } = await encryptPayloadAESGCM(payloadBase64, aes256Key, salt, secretKey);
     console.log("4. Encrypted payload using AES-256-GCM");
 
