@@ -297,12 +297,22 @@ function encryptAESKey(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
+        // Ensure the key is properly formatted
+        const publicKey = dgftPublicKey.trim();
+
+        // Verify key format
+        if (!publicKey.includes('-----BEGIN PUBLIC KEY-----') || !publicKey.includes('-----END PUBLIC KEY-----')) {
+            throw new Error("Invalid DGFT public key format");
+        }
+
+        console.log("Using DGFT public key (first 50 chars):", publicKey.substring(0, 50));
 
         const encryptedKey = crypto.publicEncrypt(
             {
-                key: dgftPublicKey,
+                key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256"
+                oaepHash: "sha256",
+                mgf: crypto.constants.RSA_MGF1
             },
             Buffer.from(secretKey, 'utf8')
         );
@@ -310,6 +320,8 @@ function encryptAESKey(secretKey) {
         const encryptedKeyBase64 = encryptedKey.toString('base64');
 
         console.log("Encrypted key (base64) length:", encryptedKeyBase64.length);
+        console.log("Encrypted key (first 50 chars):", encryptedKeyBase64.substring(0, 50));
+
         return encryptedKeyBase64;
     } catch (error) {
         console.error("AES key encryption failed:", error.message);
