@@ -267,7 +267,8 @@ async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
             iv,
             salt,
             encrypted,
-            authTag
+            authTag,
+            cipherTextWithTag
         };
     } catch (error) {
         console.error("AES-GCM encryption error:", error.message);
@@ -359,7 +360,8 @@ function encryptAESKey(secretKey) {
                 key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf: crypto.constants.RSA_MGF1
+                mgf: crypto.constants.RSA_MGF1,
+                oaepLabel: Buffer.alloc(0)
             },
             Buffer.from(secretKey, 'utf8')
         );
