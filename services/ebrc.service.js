@@ -282,7 +282,7 @@ async function encryptPayload(payload) {
 
 
 
-// Encrypt secret key using DGFT public key with RSA-OAEP
+// Step 6 :  Encrypt secret key using DGFT public key with RSA-OAEP
 function encryptAESKey(secretKey) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 6) ===");
@@ -297,12 +297,11 @@ function encryptAESKey(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        
+
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha1' 
+                padding: crypto.constants.RSA_PKCS1_PADDING,
             },
             Buffer.from(secretKey, 'utf8')
         );
