@@ -282,29 +282,44 @@ async function encryptPayload(payload) {
 
 
 
-// Encrypt secret key using DGFT public key with RSA
+// Encrypt secret key using DGFT public key with RSA-OAEP
 function encryptAESKey(secretKey) {
     try {
         console.log("=== AES KEY ENCRYPTION (Step 6) ===");
+        console.log("Secret key to encrypt:", secretKey);
+        console.log("Secret key length:", secretKey.length);
 
         if (!dgftPublicKey) {
             throw new Error("DGFT_PUBLIC_KEY not found in environment");
         }
 
-        // RSA encryption with OAEP and SHA256 padding as per Algorithm Specification
+        // Verify the secret key is exactly 32 characters
+        if (secretKey.length !== 32) {
+            throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
+        }
+
+        // RSA encryption with OAEP, SHA-256, and MGF1-SHA256
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: 'sha256',
+                mgf1Hash: 'sha256'
             },
             Buffer.from(secretKey, 'utf8')
-        ).toString('base64');
+        );
 
-        console.log("Secret key encrypted using RSA-OAEP-SHA256");
-        return encryptedKey;
+        const encryptedKeyBase64 = encryptedKey.toString('base64');
+        
+        console.log("Encrypted key length (bytes):", encryptedKey.length);
+        console.log("Encrypted key (base64) length:", encryptedKeyBase64.length);
+        console.log("First 50 chars of encrypted key:", encryptedKeyBase64.substring(0, 50));
+
+        return encryptedKeyBase64;
     } catch (error) {
-        console.error("AES key encryption failed:", error);
+        console.error("=== AES KEY ENCRYPTION FAILED ===");
+        console.error("Error:", error.message);
+        console.error("Stack:", error.stack);
         throw new Error(`AES key encryption failed: ${error.message}`);
     }
 }
