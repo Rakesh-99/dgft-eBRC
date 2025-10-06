@@ -238,7 +238,7 @@ async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
         console.log("Generated IV length:", iv.length);
 
 
-        const cipher = crypto.createCipherGCM('aes-256-gcm', aes256Key, iv);
+        const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
 
 
         const enc1 = cipher.update(payloadBase64, 'utf8');
