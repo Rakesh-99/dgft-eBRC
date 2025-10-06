@@ -134,6 +134,7 @@ export const getSandboxToken = async () => {
 
 
 
+
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
 async function generateDynamic32CharSecretKey() {
     console.log("=== GENERATING SECRET KEY (Step 3) ===");
@@ -369,7 +370,6 @@ function encryptAESKey(secretKey) {
                 key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf: crypto.constants.RSA_MGF1,
             },
             Buffer.from(secretKey, 'utf8')
         );
@@ -379,7 +379,7 @@ function encryptAESKey(secretKey) {
         console.log("Encrypted key (base64) length:", encryptedKeyBase64.length);
         console.log("Encrypted key (first 50 chars):", encryptedKeyBase64.substring(0, 50));
 
-        // Validate the encrypted key length (should be 256 bytes for 2048-bit RSA key)
+        // Validate the encrypted key length 
         if (encryptedKey.length !== 256) {
             console.warn(`Warning: Encrypted key length is ${encryptedKey.length}, expected 256 bytes`);
         }
@@ -714,4 +714,7 @@ export const fileEbrcService = async (payload) => {
 
     }
 };
+
+
+
 
