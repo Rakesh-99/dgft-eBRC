@@ -345,15 +345,24 @@ function encryptAESKey(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        // Ensure the key is properly formatted
-        const publicKey = dgftPublicKey.trim();
-
-        // Verify key format
-        if (!publicKey.includes('-----BEGIN PUBLIC KEY-----') || !publicKey.includes('-----END PUBLIC KEY-----')) {
-            throw new Error("Invalid DGFT public key format");
+        let publicKey = dgftPublicKey.trim();
+        
+        // Ensure proper line breaks in PEM format
+        if (!publicKey.includes('\n')) {
+            //  add proper line breaks,  if the key is all on one line
+            publicKey = publicKey.replace(/-----BEGIN PUBLIC KEY-----/, '-----BEGIN PUBLIC KEY-----\n');
+            publicKey = publicKey.replace(/-----END PUBLIC KEY-----/, '\n-----END PUBLIC KEY-----');
+            
+            // add line breaks every 64 characters for the key data
+            const beginMarker = '-----BEGIN PUBLIC KEY-----\n';
+            const endMarker = '\n-----END PUBLIC KEY-----';
+            const keyData = publicKey.replace(beginMarker, '').replace(endMarker, '');
+            const formattedKeyData = keyData.match(/.{1,64}/g)?.join('\n') || keyData;
+            publicKey = beginMarker + formattedKeyData + endMarker;
         }
 
-        console.log("Using DGFT public key (first 50 chars):", publicKey.substring(0, 50));
+        console.log("Using formatted DGFT public key (first 50 chars):", publicKey.substring(0, 50));
+
 
         const encryptedKey = crypto.publicEncrypt(
             {
@@ -361,7 +370,6 @@ function encryptAESKey(secretKey) {
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
                 mgf: crypto.constants.RSA_MGF1,
-                oaepLabel: Buffer.alloc(0)
             },
             Buffer.from(secretKey, 'utf8')
         );
@@ -371,9 +379,15 @@ function encryptAESKey(secretKey) {
         console.log("Encrypted key (base64) length:", encryptedKeyBase64.length);
         console.log("Encrypted key (first 50 chars):", encryptedKeyBase64.substring(0, 50));
 
+        // Validate the encrypted key length (should be 256 bytes for 2048-bit RSA key)
+        if (encryptedKey.length !== 256) {
+            console.warn(`Warning: Encrypted key length is ${encryptedKey.length}, expected 256 bytes`);
+        }
+
         return encryptedKeyBase64;
     } catch (error) {
         console.error("AES key encryption failed:", error.message);
+        console.error("Error details:", error);
         throw error;
     }
 }
