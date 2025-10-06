@@ -293,36 +293,30 @@ function encryptAESKey(secretKey) {
             throw new Error("DGFT_PUBLIC_KEY not found in environment");
         }
 
-        // Verify the secret key is exactly 32 characters
         if (secretKey.length !== 32) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        // RSA encryption with OAEP, SHA-256, and MGF1-SHA256
+        
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha256',
-                mgf1Hash: 'sha256'
+                oaepHash: 'sha1' 
             },
             Buffer.from(secretKey, 'utf8')
         );
 
         const encryptedKeyBase64 = encryptedKey.toString('base64');
-        
-        console.log("Encrypted key length (bytes):", encryptedKey.length);
-        console.log("Encrypted key (base64) length:", encryptedKeyBase64.length);
-        console.log("First 50 chars of encrypted key:", encryptedKeyBase64.substring(0, 50));
 
+        console.log("Encrypted key (base64) length:", encryptedKeyBase64.length);
         return encryptedKeyBase64;
     } catch (error) {
-        console.error("=== AES KEY ENCRYPTION FAILED ===");
-        console.error("Error:", error.message);
-        console.error("Stack:", error.stack);
-        throw new Error(`AES key encryption failed: ${error.message}`);
+        console.error("AES key encryption failed:", error.message);
+        throw error;
     }
 }
+
 
 
 
