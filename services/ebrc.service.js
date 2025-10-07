@@ -536,6 +536,8 @@ export const generateEbrcCurlParams = async (payload) => {
         console.log("messageID:", messageID);
         console.log("data:", encryptionResult.encodedData);
         console.log("sign:", encryptionResult.digitalSignature);
+        console.log("Private key ", userPrivateKey);
+
 
 
         return {
