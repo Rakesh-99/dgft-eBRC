@@ -2,12 +2,12 @@ import axios from "axios";
 import dotenv from 'dotenv';
 dotenv.config();
 import crypto from "crypto";
-
+import fs from 'fs';
 const clientSecret = process.env.CLIENT_SECRET;
 const baseUrl = process.env.DGFT_SANDBOX_URL;
 const apiKey = process.env.X_API_KEY;
 const clientId = process.env.CLIENT_ID;
-const userPrivateKey = process.env.USER_PRIVATE_KEY;
+const userPrivateKey = fs.readFileSync('./keys/private.key', 'utf8').trim();
 const dgftPublicKey = process.env.DGFT_PUBLIC_KEY;
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
