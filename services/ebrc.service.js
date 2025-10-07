@@ -538,10 +538,10 @@ export const fileEbrcService = async (payload) => {
         const headers = {
             "Content-Type": "application/json",
             "x-api-key": apiKey,
-            "accessToken": accessToken,
-            "client_id": clientId,
-            "secretVal": encryptedAESKey,
-            "messageID": messageID
+            "access-token": accessToken,
+            "client-id": clientId,
+            "secret-val": encryptedAESKey,
+            "message-id": messageID
         };
         console.log("=== REQUEST HEADERS ===");
         console.log("Headers being sent:", Object.keys(headers));
