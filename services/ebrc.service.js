@@ -207,22 +207,28 @@ async function encryptPayloadAESGCM(payloadBase64, aes256Key, salt) {
         const iv = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
 
-        const enc1 = cipher.update(payloadBase64, 'utf8');
-        const enc2 = cipher.final(); // Includes 16-byte auth tag
+        // Encrypt the data
+        const ciphertext = Buffer.concat([
+            cipher.update(payloadBase64, 'utf8'),
+            cipher.final()
+        ]);
 
-        // Verify auth tag length
-        if (enc2.length !== 16) {
-            throw new Error("GCM auth tag is not 16 bytes");
+        // Get the 16-byte authentication tag
+        const authTag = cipher.getAuthTag();
+
+        if (authTag.length !== 16) {
+            throw new Error(`Auth tag length is ${authTag.length}, expected 16`);
         }
 
-        const encryptedWithTag = Buffer.concat([enc1, enc2]); // Ciphertext + Tag
-        const finalBuffer = Buffer.concat([iv, salt, encryptedWithTag]);
+        // Final structure: IV (12) + Salt (32) + Ciphertext + AuthTag (16)
+        const finalBuffer = Buffer.concat([iv, salt, ciphertext, authTag]);
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
             iv,
             salt,
-            encryptedWithTag
+            ciphertext,
+            authTag
         };
     } catch (error) {
         console.error("AES-GCM encryption error:", error.message);
@@ -276,7 +282,7 @@ function encryptAESKey(secretKey) {
                 key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256" 
+                mgf1Hash: "sha256"
             },
             Buffer.from(secretKey, 'utf8')
         );
