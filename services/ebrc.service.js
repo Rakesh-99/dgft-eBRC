@@ -534,23 +534,28 @@ export const fileEbrcService = async (payload) => {
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
 
 
+
+        const headers = {
+            "Content-Type": "application/json",
+            "X-API-Key": apiKey,
+            "AccessToken": accessToken,
+            "Client-Id": clientId,
+            "SecretVal": encryptedAESKey,
+            "MessageID": messageID
+        };
+        console.log("=== REQUEST HEADERS ===");
+        console.log("Headers being sent:", Object.keys(headers));
+        console.log("Access token length:", accessToken?.length);
+        console.log("SecretVal length:", encryptedAESKey?.length);
+        console.log("MessageID:", messageID);
+
         // API call 
         const response = await axios.post(`${baseUrl}/pushIRMToGenEBRC`,
             {
                 data: encryptionResult.encodedData,
                 sign: encryptionResult.digitalSignature
-            },
-            {
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                    "accessToken": accessToken,
-                    "client_id": clientId,
-                    "secretVal": encryptedAESKey,
-                    "messageID": messageID
-                }
-                // timeout: 30000,
-            }
+            }, { headers }
+
         );
 
         if (response.status === 200 || response.status === 201) {
