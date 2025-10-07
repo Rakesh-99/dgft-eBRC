@@ -530,9 +530,31 @@ export const fileEbrcService = async (payload) => {
         const encryptedAESKey = encryptAESKey(encryptionResult.secretKey);
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
 
-        // Define different header formats to try
         const headerFormats = [
-         
+
+            {
+                name: "DGFT-Official",
+                headers: {
+                    "Content-Type": "application/json",
+                    "accessToken": accessToken,
+                    "client_id": clientId,
+                    "secretVal": encryptedAESKey
+                }
+            },
+
+
+            {
+                name: "DGFT-With-APIKey",
+                headers: {
+                    "Content-Type": "application/json",
+                    "accessToken": accessToken,
+                    "client_id": clientId,
+                    "secretVal": encryptedAESKey,
+                    "x-api-key": apiKey
+                }
+            },
+
+
             {
                 name: "kebab-case",
                 headers: {
@@ -544,76 +566,17 @@ export const fileEbrcService = async (payload) => {
                     "message-id": messageID
                 }
             },
-         
-            {
-                name: "Title-Case",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-Api-Key": apiKey,
-                    "Access-Token": accessToken,
-                    "Client-Id": clientId,
-                    "Secret-Val": encryptedAESKey,
-                    "Message-Id": messageID
-                }
-            },
-      
-            {
-                name: "camelCase",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                    "accessToken": accessToken,
-                    "clientId": clientId,
-                    "secretVal": encryptedAESKey,
-                    "messageId": messageID
-                }
-            },
-      
-            {
-                name: "snake_case",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x_api_key": apiKey,
-                    "access_token": accessToken,
-                    "client_id": clientId,
-                    "secret_val": encryptedAESKey,
-                    "message_id": messageID
-                }
-            },
-          
-            {
-                name: "ALL_CAPS",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-API-KEY": apiKey,
-                    "ACCESS-TOKEN": accessToken,
-                    "CLIENT-ID": clientId,
-                    "SECRET-VAL": encryptedAESKey,
-                    "MESSAGE-ID": messageID
-                }
-            },
-       
+
+
             {
                 name: "Mixed",
                 headers: {
                     "Content-Type": "application/json",
+                    "accessToken": accessToken,
+                    "client_id": clientId,
+                    "secretVal": encryptedAESKey,
                     "x-api-key": apiKey,
-                    "AccessToken": accessToken,
-                    "Client-Id": clientId,
-                    "SecretVal": encryptedAESKey,
                     "MessageID": messageID
-                }
-            },
-       
-            {
-                name: "Bearer",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                    "Authorization": `Bearer ${accessToken}`,
-                    "Client-Id": clientId,
-                    "Secret-Val": encryptedAESKey,
-                    "Message-Id": messageID
                 }
             }
         ];
@@ -626,7 +589,7 @@ export const fileEbrcService = async (payload) => {
         // Try each header format
         for (let i = 0; i < headerFormats.length; i++) {
             const format = headerFormats[i];
-            
+
             try {
                 console.log(`\n--- Attempt ${i + 1}: Trying ${format.name} format ---`);
                 console.log("Headers:", Object.keys(format.headers));
@@ -659,11 +622,11 @@ export const fileEbrcService = async (payload) => {
 
             } catch (attemptError) {
                 console.log(` ${format.name} format failed:`);
-                
+
                 if (attemptError.response) {
                     console.log(`   Status: ${attemptError.response.status}`);
                     console.log(`   Error: ${attemptError.response.data?.message || 'No message'}`);
-                    
+
                     // If we get a different error than 401/403, it might be worth investigating
                     if (attemptError.response.status !== 401 && attemptError.response.status !== 403) {
                         console.log(`   🔍 Interesting! Got status ${attemptError.response.status} - this might indicate progress`);
@@ -672,7 +635,7 @@ export const fileEbrcService = async (payload) => {
                     console.log(`   Network/Request Error: ${attemptError.message}`);
                 }
 
-            
+
                 if (i === headerFormats.length - 1) {
                     // This was the last attempt, throw the error
                     throw new Error(`All header formats failed. Last error: ${attemptError.response?.status} - ${attemptError.response?.data?.message || attemptError.message}`);
