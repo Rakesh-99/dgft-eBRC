@@ -248,111 +248,50 @@ function createDigitalSignature(dataToSign) {
 
 
 
-// Step 6 :  Encrypt secret key using DGFT public key with RSA-OAEP
-// Replace the encryptAESKey function (around line 257) with this multi-approach version:
-
+// Step 6 :  Encrypt secret key using DGFT public key 
 function encryptAESKey(secretKey) {
-    if (!dgftPublicKey) {
-        throw new Error("DGFT_PUBLIC_KEY not found in environment");
-    }
-    if (secretKey.length !== 32) {
-        throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
-    }
-
-    const pem = dgftPublicKey.trim();
-    let publicKey;
-    if (pem.includes('\n')) {
-        publicKey = pem;
-    } else {
-        const begin = "-----BEGIN PUBLIC KEY-----";
-        const end = "-----END PUBLIC KEY-----";
-        if (!pem.startsWith(begin) || !pem.endsWith(end)) {
-            throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
+    try {
+        if (!dgftPublicKey) {
+            throw new Error("DGFT_PUBLIC_KEY not found in environment");
         }
-        const keyData = pem.substring(begin.length, pem.length - end.length).replace(/\s/g, '');
-        const formattedKeyData = keyData.match(/.{1,64}/g)?.join('\n') || keyData;
-        publicKey = `${begin}\n${formattedKeyData}\n${end}`;
-    }
+        if (secretKey.length !== 32) {
+            throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
+        }
 
-    // Define different RSA encryption approaches to try
-    const encryptionApproaches = [
-        // Approach 1: RSA-PKCS1 v1.5 (most common in government systems)
-        {
-            name: "PKCS1-v1.5",
-            options: {
+        const pem = dgftPublicKey.trim();
+        let publicKey;
+        if (pem.includes('\n')) {
+            publicKey = pem;
+        } else {
+            const begin = "-----BEGIN PUBLIC KEY-----";
+            const end = "-----END PUBLIC KEY-----";
+            if (!pem.startsWith(begin) || !pem.endsWith(end)) {
+                throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
+            }
+            const keyData = pem.substring(begin.length, pem.length - end.length).replace(/\s/g, '');
+            const formattedKeyData = keyData.match(/.{1,64}/g)?.join('\n') || keyData;
+            publicKey = `${begin}\n${formattedKeyData}\n${end}`;
+        }
+
+        // Use RSA-PKCS1 v1.5 padding (confirmed working with DGFT)
+        const encryptedKey = crypto.publicEncrypt(
+            {
                 key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_PADDING
-            }
-        },
-        
-        // Approach 2: RSA-OAEP with SHA-1 (older standard)
-        {
-            name: "OAEP-SHA1",
-            options: {
-                key: publicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha1'
-            }
-        },
-        
-        // Approach 3: RSA-OAEP with SHA-256 (current standard)
-        {
-            name: "OAEP-SHA256",
-            options: {
-                key: publicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha256'
-            }
-        },
-        
-        // Approach 4: RSA-OAEP with explicit MGF1
-        {
-            name: "OAEP-SHA1-MGF1",
-            options: {
-                key: publicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: 'sha1',
-                mgf: crypto.constants.RSA_PKCS1_MGF1_PADDING
-            }
-        }
-    ];
+            },
+            Buffer.from(secretKey, 'utf8')
+        );
 
-    console.log("=== TRYING MULTIPLE RSA ENCRYPTION APPROACHES ===");
+        const encryptedKeyBase64 = encryptedKey.toString('base64');
+        console.log(`Encrypted secret key length: ${encryptedKey.length} bytes`);
+        console.log(`Using PKCS1-v1.5 padding for RSA encryption`);
 
-    // Try each approach
-    for (let i = 0; i < encryptionApproaches.length; i++) {
-        const approach = encryptionApproaches[i];
-        
-        try {
-            console.log(`--- Attempt ${i + 1}: Trying ${approach.name} ---`);
-            
-            const encryptedKey = crypto.publicEncrypt(
-                approach.options,
-                Buffer.from(secretKey, 'utf8')
-            );
-
-            const encryptedKeyBase64 = encryptedKey.toString('base64');
-            console.log(` SUCCESS with ${approach.name}!`);
-            console.log(`Encrypted secret key length: ${encryptedKey.length} bytes`);
-            console.log(`Using ${approach.name} for RSA encryption`);
-
-            return {
-                encryptedKey: encryptedKeyBase64,
-                method: approach.name,
-                success: true
-            };
-
-        } catch (error) {
-            console.log(`${approach.name} failed: ${error.message}`);
-            
-            // Continue to next approach unless it's the last one
-            if (i === encryptionApproaches.length - 1) {
-                throw new Error(`All RSA encryption approaches failed. Last error: ${error.message}`);
-            }
-        }
+        return encryptedKeyBase64;
+    } catch (error) {
+        console.error("AES key encryption failed:", error.message);
+        throw new Error(`Failed to encrypt secret key: ${error.message}`);
     }
 }
-
 
 
 //  encryption process 
@@ -562,25 +501,24 @@ export const fileEbrcService = async (payload) => {
 
         // Encryption and signature process 
         const encryptionResult = await encryptPayload(payload);
-        const encryptedAESResult = encryptAESKey(encryptionResult.secretKey);
+        const encryptedAESKey = encryptAESKey(encryptionResult.secretKey);  
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
 
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
             "client_id": clientId,
-            "secretVal": encryptedAESResult.encryptedKey,  
+            "secretVal": encryptedAESKey,  
             "x-api-key": apiKey,
         };
 
         console.log("=== REQUEST HEADERS ===");
         console.log("Headers being sent:", Object.keys(headers));
         console.log("Access token length:", accessToken?.length);
-        console.log("SecretVal length:", encryptedAESResult.encryptedKey?.length);
-        console.log("RSA Method used:", encryptedAESResult.method);
+        console.log("SecretVal length:", encryptedAESKey?.length);
         console.log("MessageID:", messageID);
 
-        // Make API call to DGFT
+        // Make API call
         const response = await axios.post(
             `${baseUrl}/pushIRMToGenEBRC`,
             {
@@ -595,14 +533,12 @@ export const fileEbrcService = async (payload) => {
 
         console.log("eBRC FILING SUCCESS ");
         console.log("Response Data:", response.data);
-        console.log("Successful RSA method:", encryptedAESResult.method);
 
         return {
             success: true,
             message: "eBRC data has been successfully filed",
             data: response.data,
-            messageID: messageID,
-            rsaMethod: encryptedAESResult.method
+            messageID: messageID
         };
 
     } catch (error) {
@@ -617,6 +553,5 @@ export const fileEbrcService = async (payload) => {
         throw error;
     }
 };
-
 
 
