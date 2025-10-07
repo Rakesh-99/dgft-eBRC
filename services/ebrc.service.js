@@ -285,7 +285,7 @@ function encryptAESKey(secretKey) {
 
         const encryptedKeyBase64 = encryptedKey.toString('base64');
         console.log(`Encrypted secret key length: ${encryptedKey.length} bytes`);
-        console.log(`Using PKCS#1 v1.5 padding for RSA encryption`);
+
 
         return encryptedKeyBase64;
     } catch (error) {
@@ -510,7 +510,8 @@ export const fileEbrcService = async (payload) => {
             "Content-Type": "application/json",
             "accessToken": accessToken,
             "client_id": clientId,
-            "secretVal": encryptedAESKey
+            "secretVal": encryptedAESKey,
+            "x-api-key": apiKey,
         };
 
         console.log("=== REQUEST HEADERS ===");
