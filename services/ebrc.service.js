@@ -490,10 +490,35 @@ export const generateEbrcCurlParams = async (payload) => {
     }
 };
 
+
+
+
+function testPrivateKeyFormat() {
+    try {
+        console.log("=== TESTING PRIVATE KEY FORMAT ===");
+
+        const testData = "test signature data";
+        const signer = crypto.createSign("RSA-SHA256");
+        signer.update(testData, 'utf8');
+        const signature = signer.sign(userPrivateKey, "base64");
+
+        console.log(" Private key format is valid");
+        console.log("Private key sample (first 100 chars):", userPrivateKey.substring(0, 100) + "...");
+
+        return true;
+    } catch (error) {
+        console.error(" Private key format error:", error.message);
+        return false;
+    }
+}
+
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
 
+        if (!testPrivateKeyFormat()) {
+            throw new Error("Invalid private key format -");
+        }
         // Validate payload against DGFT specifications
         validatePayload(payload);
 
