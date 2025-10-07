@@ -519,7 +519,7 @@ export const fileEbrcService = async (payload) => {
             throw new Error("Invalid private key format");
         }
 
-        // Validate payload against DGFT specifications
+        // Validate payload 
         validatePayload(payload);
 
         // Get access token
@@ -530,122 +530,52 @@ export const fileEbrcService = async (payload) => {
         const encryptedAESKey = encryptAESKey(encryptionResult.secretKey);
         const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
 
-        const headerFormats = [
+    
+        const headers = {
+            "Content-Type": "application/json",
+            "accessToken": accessToken,
+            "client_id": clientId,
+            "secretVal": encryptedAESKey
+        };
 
-            {
-                name: "DGFT-Official",
-                headers: {
-                    "Content-Type": "application/json",
-                    "accessToken": accessToken,
-                    "client_id": clientId,
-                    "secretVal": encryptedAESKey
-                }
-            },
-
-
-            {
-                name: "DGFT-With-APIKey",
-                headers: {
-                    "Content-Type": "application/json",
-                    "accessToken": accessToken,
-                    "client_id": clientId,
-                    "secretVal": encryptedAESKey,
-                    "x-api-key": apiKey
-                }
-            },
-
-
-            {
-                name: "kebab-case",
-                headers: {
-                    "Content-Type": "application/json",
-                    "x-api-key": apiKey,
-                    "access-token": accessToken,
-                    "client-id": clientId,
-                    "secret-val": encryptedAESKey,
-                    "message-id": messageID
-                }
-            },
-
-
-            {
-                name: "Mixed",
-                headers: {
-                    "Content-Type": "application/json",
-                    "accessToken": accessToken,
-                    "client_id": clientId,
-                    "secretVal": encryptedAESKey,
-                    "x-api-key": apiKey,
-                    "MessageID": messageID
-                }
-            }
-        ];
-
-        console.log("=== TRYING MULTIPLE HEADER FORMATS ===");
+        console.log("=== REQUEST HEADERS ===");
+        console.log("Headers being sent:", Object.keys(headers));
         console.log("Access token length:", accessToken?.length);
         console.log("SecretVal length:", encryptedAESKey?.length);
         console.log("MessageID:", messageID);
 
-        // Try each header format
-        for (let i = 0; i < headerFormats.length; i++) {
-            const format = headerFormats[i];
-
-            try {
-                console.log(`\n--- Attempt ${i + 1}: Trying ${format.name} format ---`);
-                console.log("Headers:", Object.keys(format.headers));
-
-                const response = await axios.post(
-                    `${baseUrl}/pushIRMToGenEBRC`,
-                    {
-                        data: encryptionResult.encodedData,
-                        sign: encryptionResult.digitalSignature
-                    },
-                    {
-                        headers: format.headers,
-                        timeout: 30000
-                    }
-                );
-
-                // Success!
-                if (response.status === 200 || response.status === 201) {
-                    console.log(`\n SUCCESS with ${format.name} format! 🎉`);
-                    console.log("Response Data:", response.data);
-
-                    return {
-                        success: true,
-                        message: "eBRC data has been successfully filed",
-                        data: response.data,
-                        messageID: messageID,
-                        successfulHeaderFormat: format.name
-                    };
-                }
-
-            } catch (attemptError) {
-                console.log(` ${format.name} format failed:`);
-
-                if (attemptError.response) {
-                    console.log(`   Status: ${attemptError.response.status}`);
-                    console.log(`   Error: ${attemptError.response.data?.message || 'No message'}`);
-
-                    // If we get a different error than 401/403, it might be worth investigating
-                    if (attemptError.response.status !== 401 && attemptError.response.status !== 403) {
-                        console.log(`   🔍 Interesting! Got status ${attemptError.response.status} - this might indicate progress`);
-                    }
-                } else {
-                    console.log(`   Network/Request Error: ${attemptError.message}`);
-                }
-
-
-                if (i === headerFormats.length - 1) {
-                    // This was the last attempt, throw the error
-                    throw new Error(`All header formats failed. Last error: ${attemptError.response?.status} - ${attemptError.response?.data?.message || attemptError.message}`);
-                }
+        // Make API call to DGFT
+        const response = await axios.post(
+            `${baseUrl}/pushIRMToGenEBRC`,
+            {
+                data: encryptionResult.encodedData,
+                sign: encryptionResult.digitalSignature
+            },
+            {
+                headers,
+                timeout: 30000
             }
-        }
+        );
+
+        console.log(" eBRC FILING SUCCESS ");
+        console.log("Response Data:", response.data);
+
+        return {
+            success: true,
+            message: "eBRC data has been successfully filed",
+            data: response.data,
+            messageID: messageID
+        };
 
     } catch (error) {
-        console.error("=== eBRC FILING COMPLETELY FAILED ===");
-        console.error("Final Error:", error.message);
+        console.error("=== eBRC FILING ERROR ===");
+        if (error.response) {
+            console.error("Error Status:", error.response.status);
+            console.error("Error Data:", error.response.data);
+            console.error("Error Headers:", error.response.headers);
+        } else {
+            console.error("Error Message:", error.message);
+        }
         throw error;
     }
 };
