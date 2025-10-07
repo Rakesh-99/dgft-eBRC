@@ -273,19 +273,18 @@ function encryptAESKey(secretKey) {
             publicKey = `${begin}\n${formattedKeyData}\n${end}`;
         }
 
-        // Encrypt with OAEP (SHA-256 for both OAEP and MGF1)
+        // Use PKCS#1 v1.5 padding instead of OAEP (most common for government systems)
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: publicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256",
-                mgf1Hash: "sha256"
+                padding: crypto.constants.RSA_PKCS1_PADDING
             },
             Buffer.from(secretKey, 'utf8')
         );
 
         const encryptedKeyBase64 = encryptedKey.toString('base64');
         console.log(`Encrypted secret key length: ${encryptedKey.length} bytes`);
+        console.log(`Using PKCS#1 v1.5 padding for RSA encryption`);
 
         return encryptedKeyBase64;
     } catch (error) {
