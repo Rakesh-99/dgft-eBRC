@@ -2,8 +2,6 @@ import axios from "axios";
 import dotenv from 'dotenv';
 dotenv.config();
 import crypto from "crypto";
-import fs from 'fs';
-import path from 'path';
 
 const clientSecret = (process.env.CLIENT_SECRET || '').trim();
 const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
@@ -13,24 +11,6 @@ const userPrivateKey = (process.env.USER_PRIVATE_KEY || '').trim();
 const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').trim();
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
 const userPublicKey = (process.env.USER_PUBLIC_KEY || '').trim();
-
-
-
-console.log("=== ENVIRONMENT VARIABLES LOADED ===");
-console.log("CLIENT_ID:", clientId);
-console.log("CLIENT_SECRET length:", clientSecret.length);
-console.log("X_API_KEY length:", apiKey.length);
-console.log("USER_PRIVATE_KEY length:", userPrivateKey.length);
-console.log("USER_PUBLIC_KEY length:", userPublicKey.length);
-console.log("DGFT_PUBLIC_KEY length:", dgftPublicKey.length);
-console.log("DGFT_PUBLIC_KEY starts with BEGIN:", dgftPublicKey.startsWith("-----BEGIN PUBLIC KEY-----"));
-console.log("DGFT_PUBLIC_KEY ends with END:", dgftPublicKey.endsWith("-----END PUBLIC KEY-----"));
-
-
-const logDir = '/tmp';
-if (!fs.existsSync(logDir)) {
-    fs.mkdirSync(logDir, { recursive: true });
-}
 
 
 // Currency codes from DGFT specification
@@ -147,14 +127,12 @@ export const getSandboxToken = async () => {
         }
 
         console.log("Token generated successfully (length):", accessToken.length);
-        return { accessToken };   // normalized return
+        return { accessToken };   
     } catch (error) {
         console.error("Error while getting token:", error.response?.data || error.message || error);
         throw new Error(`Authentication failed: ${error.message || error}`);
     }
 };
-
-
 
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
@@ -173,14 +151,9 @@ async function generateDynamic32CharSecretKey() {
     if (secretKey.length > 32) {
         secretKey = secretKey.substring(0, 32);
     } else {
-        // Pad with a safe keyboard character (e.g., '0' or 'X')
+        // Pad with keyboard character (e.g., '0' or 'X')
         secretKey = secretKey.padEnd(32, '0');
     }
-
-    const keyLog = `Generated secret key: "${secretKey}" (length: ${secretKey.length})`;
-    console.log(keyLog);
-    fs.appendFileSync('/tmp/dgft-debug.log', `[${new Date().toISOString()}] ${keyLog}\n`);
-
     return { secretKey };
 }
 
@@ -244,8 +217,6 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
             cipher.final()
         ]);
 
-
-
         // Final structure: IV (12) + Salt (32) + Ciphertext
         const finalBuffer = Buffer.concat([iv, salt, ciphertext]);
 
@@ -305,11 +276,6 @@ function encryptAESKey(secretKey) {
         console.log(" secretVal RAW buffer length:", encryptedKey.length);
         console.log(" secretVal BASE64 length:", encryptedKey.toString('base64').length);
 
-
-        const logMessage = `secretVal RAW buffer length: ${encryptedKey.length}, Base64 length: ${encryptedKey.toString('base64').length}`;
-        console.log(logMessage);
-        fs.appendFileSync('/tmp/dggft-debug.log', `[${new Date().toISOString()}] ${logMessage}\n`);
-
         return encryptedKey.toString('base64');
     } catch (error) {
         console.error("AES key encryption failed:", error.message);
@@ -347,7 +313,7 @@ function encryptAESKeyForLocalTesting(secretKey) {
         );
 
         const encryptedKeyBase64 = encryptedKey.toString('base64');
-        console.log(`🔒 Local test - Encrypted secret key length: ${encryptedKey.length} bytes`);
+        console.log(`Local test - Encrypted secret key length: ${encryptedKey.length} bytes`);
 
         return encryptedKeyBase64;
     } catch (error) {
@@ -363,7 +329,6 @@ function decryptSecretVal(encryptedSecretValBase64, privateKey) {
         const decrypted = crypto.privateDecrypt(
             {
                 key: privateKey,
-                // padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
                 mgf1Hash: "sha256",
@@ -659,32 +624,6 @@ export const fileEbrcService = async (payload) => {
             "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
         };
-
-        console.log("=== FINAL REQUEST TO DGFT ===");
-        console.log("URL:", `${baseUrl}/pushIRMToGenEBRC`);
-        console.log("Headers:", {
-            "Content-Type": headers["Content-Type"],
-            "accessToken": headers.accessToken.substring(0, 20) + "...",
-            "client_id": headers.client_id,
-            "secretVal": headers.secretVal.substring(0, 20) + "...",
-            "x-api-key": headers["x-api-key"].substring(0, 10) + "..."
-        });
-        console.log("Data length:", encryptionResult.encodedData.length);
-        console.log("Sign length:", encryptionResult.digitalSignature.length);
-        console.log("Full secretVal (first 100 chars):", encryptedAESKey.substring(0, 100));
-
-        const debugLog = `
-        === FINAL REQUEST ===
-        URL: ${baseUrl}/pushIRMToGenEBRC
-        client_id: ${clientId}
-        secretVal length: ${encryptedAESKey.length}
-        secretVal preview: ${encryptedAESKey.substring(0, 50)}
-        accessToken preview: ${accessToken.substring(0, 20)}
-        x-api-key preview: ${apiKey.substring(0, 10)}
-        `;
-        console.log(debugLog);
-        fs.appendFileSync('/tmp/dgft-debug.log', `[${new Date().toISOString()}] ${debugLog.replace(/\n/g, ' | ')}\n`);
-
         // API call
         const response = await axios.post(
             `${baseUrl}/pushIRMToGenEBRC`,
@@ -717,10 +656,6 @@ export const fileEbrcService = async (payload) => {
         } else {
             console.error("Error Message:", error.message);
         }
-
-        const errorLog = `eBRC FILING ERROR: ${error.message}\nStack: ${error.stack}\nResponse: ${JSON.stringify(error.response?.data)}`;
-        console.error(errorLog);
-        fs.appendFileSync('/tmp/dgft-debug.log', `[${new Date().toISOString()}] ${errorLog}\n`);
         throw error;
     }
 };
