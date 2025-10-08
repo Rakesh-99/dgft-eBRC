@@ -269,9 +269,7 @@ function encryptAESKey(secretKey) {
             {
                 key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256",
-                mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0) // ← THIS IS REQUIRED TO MATCH JAVA
+                oaepHash: "sha256"
             },
             Buffer.from(secretKey, 'utf8')
         );
@@ -306,8 +304,6 @@ function encryptAESKeyForLocalTesting(secretKey) {
                 key: userPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0)
             },
             Buffer.from(secretKey, 'utf8')
         );
@@ -331,8 +327,6 @@ function decryptSecretVal(encryptedSecretValBase64, privateKey) {
                 key: privateKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0)
             },
             encryptedBuffer
         );
