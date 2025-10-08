@@ -265,21 +265,18 @@ function encryptAESKey(secretKey) {
             throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
         }
 
-        // OAEP with SHA-256 for both OAEP and MGF1
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: publicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256"
+                mgf1Hash: "sha256",
+                oaepLabel: Buffer.alloc(0) // ← THIS IS REQUIRED TO MATCH JAVA
             },
             Buffer.from(secretKey, 'utf8')
         );
 
-        const encryptedKeyBase64 = encryptedKey.toString('base64');
-        console.log(`Encrypted secret key length: ${encryptedKey.length} bytes`);
-
-        return encryptedKeyBase64;
+        return encryptedKey.toString('base64');
     } catch (error) {
         console.error("AES key encryption failed:", error.message);
         throw new Error(`Failed to encrypt secret key: ${error.message}`);
@@ -309,7 +306,8 @@ function encryptAESKeyForLocalTesting(secretKey) {
                 key: userPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256"
+                mgf1Hash: "sha256",
+                oaepLabel: Buffer.alloc(0)
             },
             Buffer.from(secretKey, 'utf8')
         );
@@ -333,7 +331,8 @@ function decryptSecretVal(encryptedSecretValBase64, privateKey) {
                 key: privateKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256"
+                mgf1Hash: "sha256",
+                oaepLabel: Buffer.alloc(0)
             },
             encryptedBuffer
         );
