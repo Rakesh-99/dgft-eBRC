@@ -252,7 +252,6 @@ function createDigitalSignature(dataToSign) {
 }
 
 
-
 // Step 6 :  Encrypt secret key using DGFT public key 
 function encryptAESKey(secretKey) {
     try {
@@ -535,48 +534,69 @@ export const generateEbrcCurlParams = async (payload) => {
     try {
         console.log("=== STARTING EBRC CURL PARAMS GENERATION ===");
 
+        // Log environment variables and keys
+        console.log("ENVIRONMENT VARIABLES:");
+        console.log("CLIENT_ID:", clientId);
+        console.log("CLIENT_SECRET (length):", clientSecret?.length);
+        console.log("DGFT_SANDBOX_URL:", baseUrl);
+        console.log("ACCESS_TOKEN_URL:", accessTokenBaseUrl);
+        console.log("X_API_KEY:", apiKey);
+        console.log("USER_PRIVATE_KEY (length):", userPrivateKey?.length);
+        console.log("USER_PUBLIC_KEY (length):", process.env.USER_PUBLIC_KEY?.length);
+        console.log("DGFT_PUBLIC_KEY (length):", dgftPublicKey?.length);
+
+        // Print DGFT public key PEM
+        console.log("DGFT PUBLIC KEY PEM:\n", dgftPublicKey);
+
         // Step 1: Validate payload
+        console.log("Payload to validate:", JSON.stringify(payload, null, 2));
         validatePayload(payload);
-        console.log("✅ Payload validation passed");
+        console.log("Payload validation passed");
 
         // Step 2: Get access token
         const { accessToken } = await getSandboxToken();
-        console.log("✅ Access token obtained");
+        console.log("Access token obtained:", accessToken?.substring(0, 20), "... (length:", accessToken?.length, ")");
 
         // Step 3: Encrypt payload
         const encryptionResult = await encryptPayload(payload);
-        console.log("✅ Payload encrypted with AES-GCM");
+        console.log("Payload encrypted with AES-GCM");
+        console.log("Secret Key (32 chars):", encryptionResult.secretKey);
+        console.log("Salt (base64):", encryptionResult.salt?.toString('base64'));
+        console.log("IV (base64):", encryptionResult.iv?.toString('base64'));
+        console.log("AES Key (hex):", createAES256Key(encryptionResult.secretKey, encryptionResult.salt).toString('hex'));
+        console.log("Ciphertext (base64):", encryptionResult.ciphertext?.toString('base64'));
+        console.log("AuthTag (base64):", encryptionResult.authTag?.toString('base64'));
+        console.log("Final Encrypted Buffer (base64):", encryptionResult.finalBuffer?.substring(0, 60), "... (length:", encryptionResult.finalBuffer?.length, ")");
 
         // Step 4: Encrypt AES key with DGFT's public key (for production API)
         const encryptedAESKeyForAPI = encryptAESKey(encryptionResult.secretKey);
-        console.log("✅ AES key encrypted with DGFT's public key (for API)");
+        console.log("AES key encrypted with DGFT's public key (base64):", encryptedAESKeyForAPI?.substring(0, 60), "... (length:", encryptedAESKeyForAPI?.length, ")");
 
         // Step 5: LOCAL TESTING - Encrypt/Decrypt with YOUR keys
         console.log("\n=== LOCAL ENCRYPTION/DECRYPTION TEST ===");
         try {
             // Encrypt with YOUR public key
             const encryptedAESKeyForTesting = encryptAESKeyForLocalTesting(encryptionResult.secretKey);
-            console.log("✅ AES key encrypted with YOUR public key");
+            console.log("AES key encrypted with YOUR public key (base64):", encryptedAESKeyForTesting?.substring(0, 60), "... (length:", encryptedAESKeyForTesting?.length, ")");
 
             // Decrypt with YOUR private key
             const decryptedSecret = decryptSecretVal(encryptedAESKeyForTesting, userPrivateKey);
-            console.log("✅ AES key decrypted with YOUR private key", decryptedSecret);
+            console.log("AES key decrypted with YOUR private key:", decryptedSecret);
 
             // Verify they match
             const keysMatch = decryptedSecret === encryptionResult.secretKey;
-            console.log("🔑 Original secret key:", encryptionResult.secretKey);
-            console.log("🔓 Decrypted secret key:", decryptedSecret);
-            console.log("✨ Keys match:", keysMatch ? "YES ✅" : "NO ❌");
+            console.log("Original secret key:", encryptionResult.secretKey);
+            console.log("Decrypted secret key:", decryptedSecret);
+            console.log("Keys match:", keysMatch ? "YES" : "NO");
 
             if (!keysMatch) {
                 throw new Error("Local encryption/decryption test FAILED - keys don't match!");
             }
 
-            console.log("🎉 LOCAL TEST PASSED - Encryption/Decryption working correctly!");
+            console.log("LOCAL TEST PASSED - Encryption/Decryption working correctly!");
 
         } catch (testError) {
-            console.error("❌ LOCAL TEST FAILED:", testError.message);
-            // Don't throw here - just log the error and continue with API preparation
+            console.error("LOCAL TEST FAILED:", testError.message);
         }
         console.log("=== END LOCAL TEST ===\n");
 
@@ -585,29 +605,29 @@ export const generateEbrcCurlParams = async (payload) => {
 
         // Step 7: Display final results
         console.log("=== FINAL API PARAMETERS ===");
-        console.log("🔑 Access Token (length):", accessToken?.length);
-        console.log("🔒 Secret Val (length):", encryptedAESKeyForAPI?.length);
-        console.log("📋 Message ID:", messageID);
-        console.log("📦 Data (length):", encryptionResult.encodedData?.length);
-        console.log("✍️  Signature (length):", encryptionResult.digitalSignature?.length);
+        console.log("Access Token (length):", accessToken?.length);
+        console.log("Secret Val (length):", encryptedAESKeyForAPI?.length);
+        console.log("Message ID:", messageID);
+        console.log("Data (length):", encryptionResult.encodedData?.length);
+        console.log("Signature (length):", encryptionResult.digitalSignature?.length);
+        console.log("Data (base64):", encryptionResult.encodedData?.substring(0, 60), "...");
 
         return {
             accessToken,
-            secretVal: encryptedAESKeyForAPI,  // This uses DGFT's public key for the API
+            secretVal: encryptedAESKeyForAPI,
             messageID,
             data: encryptionResult.encodedData,
             sign: encryptionResult.digitalSignature
         };
 
     } catch (error) {
-        console.error("❌ Error generating cURL params:", error.message);
+        console.error("Error generating cURL params:", error.message);
         throw error;
     }
 };
 
-// ...existing code...
-// File eBRC data
 
+// File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
         // Validate payload 
@@ -629,13 +649,7 @@ export const fileEbrcService = async (payload) => {
             "x-api-key": apiKey,
         };
 
-        console.log("=== REQUEST HEADERS ===");
-        console.log("Headers being sent:", Object.keys(headers));
-        console.log("Access token length:", accessToken?.length);
-        console.log("SecretVal length:", encryptedAESKey?.length);
-        console.log("MessageID:", messageID);
-
-        // Make API call
+        // API call
         const response = await axios.post(
             `${baseUrl}/pushIRMToGenEBRC`,
             {
