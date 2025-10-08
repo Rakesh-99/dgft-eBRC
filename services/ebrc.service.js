@@ -268,7 +268,8 @@ function encryptAESKey(secretKey) {
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: publicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                // padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                padding: crypto.constants.RSA_PKCS1_PADDING,
                 oaepHash: "sha256"
             },
             Buffer.from(secretKey, 'utf8')
@@ -302,7 +303,8 @@ function encryptAESKeyForLocalTesting(secretKey) {
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: userPublicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                // padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                padding: crypto.constants.RSA_PKCS1_PADDING,
                 oaepHash: "sha256",
             },
             Buffer.from(secretKey, 'utf8')
@@ -325,7 +327,8 @@ function decryptSecretVal(encryptedSecretValBase64, privateKey) {
         const decrypted = crypto.privateDecrypt(
             {
                 key: privateKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                // padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                padding: crypto.constants.RSA_PKCS1_PADDING,
                 oaepHash: "sha256",
             },
             encryptedBuffer
