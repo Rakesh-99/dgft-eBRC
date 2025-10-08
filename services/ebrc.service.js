@@ -2,13 +2,13 @@ import axios from "axios";
 import dotenv from 'dotenv';
 dotenv.config();
 import crypto from "crypto";
-const clientSecret = process.env.CLIENT_SECRET;
-const baseUrl = process.env.DGFT_SANDBOX_URL;
-const apiKey = process.env.X_API_KEY;
-const clientId = process.env.CLIENT_ID;
+const clientSecret = (process.env.CLIENT_SECRET || '').trim();
+const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
+const apiKey = (process.env.X_API_KEY || '').trim();
+const clientId = (process.env.CLIENT_ID || '').trim();
 const userPrivateKey = (process.env.USER_PRIVATE_KEY || '').trim();
 const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').trim();
-const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
+const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
 const userPublicKey = (process.env.USER_PUBLIC_KEY || '').trim();
 
 // Currency codes from DGFT specification
@@ -217,7 +217,7 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
             cipher.final()
         ]);
 
-     
+
 
         // Final structure: IV (12) + Salt (32) + Ciphertext
         const finalBuffer = Buffer.concat([iv, salt, ciphertext]);
