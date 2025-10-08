@@ -127,7 +127,7 @@ export const getSandboxToken = async () => {
         }
 
         console.log("Token generated successfully (length):", accessToken.length);
-        return { accessToken };   
+        return { accessToken };
     } catch (error) {
         console.error("Error while getting token:", error.response?.data || error.message || error);
         throw new Error(`Authentication failed: ${error.message || error}`);
@@ -246,6 +246,45 @@ function createDigitalSignature(dataToSign) {
 
 
 // Step 6 :  Encrypt secret key using DGFT public key 
+// function encryptAESKey(secretKey) {
+//     try {
+//         if (!dgftPublicKey) {
+//             throw new Error("DGFT_PUBLIC_KEY not found in environment");
+//         }
+//         if (secretKey.length !== 32) {
+//             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
+//         }
+
+//         const publicKey = dgftPublicKey.trim();
+//         if (
+//             !publicKey.startsWith("-----BEGIN PUBLIC KEY-----") ||
+//             !publicKey.endsWith("-----END PUBLIC KEY-----")
+//         ) {
+//             throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
+//         }
+
+//         const encryptedKey = crypto.publicEncrypt(
+//             {
+//                 key: publicKey,
+//                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+//                 oaepHash: "sha256",
+//                 mgf1Hash: "sha256",
+//                 oaepLabel: Buffer.alloc(0)
+//             },
+//             Buffer.from(secretKey, 'utf8')
+//         );
+//         console.log(" secretVal RAW buffer length:", encryptedKey.length);
+//         console.log(" secretVal BASE64 length:", encryptedKey.toString('base64').length);
+
+//         return encryptedKey.toString('base64');
+//     } catch (error) {
+//         console.error("AES key encryption failed:", error.message);
+//         throw new Error(`Failed to encrypt secret key: ${error.message}`);
+//     }
+// }
+
+
+// alt approach for using direct cer file : 
 function encryptAESKey(secretKey) {
     try {
         if (!dgftPublicKey) {
@@ -255,12 +294,26 @@ function encryptAESKey(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        const publicKey = dgftPublicKey.trim();
-        if (
-            !publicKey.startsWith("-----BEGIN PUBLIC KEY-----") ||
-            !publicKey.endsWith("-----END PUBLIC KEY-----")
-        ) {
-            throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
+        let keyInput = dgftPublicKey.trim();
+        
+        // Debug: Log the raw value to confirm
+        console.log("Raw dgftPublicKey from env (first 50 chars):", keyInput.substring(0, 50));
+        
+        // Strip outer quotes if present (from .env)
+        if (keyInput.startsWith('"') && keyInput.endsWith('"')) {
+            keyInput = keyInput.slice(1, -1);
+            console.log("After stripping quotes (first 50 chars):", keyInput.substring(0, 50));
+        }
+
+        let publicKey;
+        // Handle certificate or public key PEM
+        if (keyInput.startsWith("-----BEGIN CERTIFICATE-----")) {
+            publicKey = crypto.createPublicKey(keyInput);  // Load certificate and derive public key
+        } else if (keyInput.startsWith("-----BEGIN PUBLIC KEY-----")) {
+            publicKey = keyInput;  // Direct PEM
+        } else {
+            console.log("keyInput does not start with certificate or public key header. Full keyInput (first 100):", keyInput.substring(0, 100));
+            throw new Error("DGFT_PUBLIC_KEY must be a certificate or public key in PEM format");
         }
 
         const encryptedKey = crypto.publicEncrypt(
@@ -282,7 +335,6 @@ function encryptAESKey(secretKey) {
         throw new Error(`Failed to encrypt secret key: ${error.message}`);
     }
 }
-
 
 // Encrypt secret key using DGFT public key to test in local machine : 
 function encryptAESKeyForLocalTesting(secretKey) {
@@ -507,22 +559,7 @@ export const generateEbrcCurlParams = async (payload) => {
     try {
         console.log("=== STARTING EBRC CURL PARAMS GENERATION ===");
 
-        // Log environment variables and keys
-        console.log("ENVIRONMENT VARIABLES:");
-        console.log("CLIENT_ID:", clientId);
-        console.log("CLIENT_SECRET (length):", clientSecret?.length);
-        console.log("DGFT_SANDBOX_URL:", baseUrl);
-        console.log("ACCESS_TOKEN_URL:", accessTokenBaseUrl);
-        console.log("X_API_KEY:", apiKey);
-        console.log("USER_PRIVATE_KEY (length):", userPrivateKey?.length);
-        console.log("USER_PUBLIC_KEY (length):", process.env.USER_PUBLIC_KEY?.length);
-        console.log("DGFT_PUBLIC_KEY (length):", dgftPublicKey?.length);
 
-        // Print DGFT public key PEM
-        console.log("DGFT PUBLIC KEY PEM:\n", dgftPublicKey);
-
-        // Step 1: Validate payload
-        console.log("Payload to validate:", JSON.stringify(payload, null, 2));
         validatePayload(payload);
         console.log("Payload validation passed");
 
@@ -532,17 +569,10 @@ export const generateEbrcCurlParams = async (payload) => {
 
         // Step 3: Encrypt payload
         const encryptionResult = await encryptPayload(payload);
-        console.log("Payload encrypted with AES-GCM");
-        console.log("Secret Key (32 chars):", encryptionResult.secretKey);
-        console.log("Salt (base64):", encryptionResult.salt?.toString('base64'));
-        console.log("IV (base64):", encryptionResult.iv?.toString('base64'));
-        console.log("AES Key (hex):", createAES256Key(encryptionResult.secretKey, encryptionResult.salt).toString('hex'));
-        console.log("Ciphertext (base64):", encryptionResult.ciphertext?.toString('base64'));
-        console.log("Final Encrypted Buffer (base64):", encryptionResult.finalBuffer?.substring(0, 60), "... (length:", encryptionResult.finalBuffer?.length, ")");
 
         // Step 4: Encrypt AES key with DGFT's public key (for production API)
         const encryptedAESKeyForAPI = encryptAESKey(encryptionResult.secretKey);
-        console.log("AES key encrypted with DGFT's public key (base64):", encryptedAESKeyForAPI?.substring(0, 60), "... (length:", encryptedAESKeyForAPI?.length, ")");
+
 
         // Step 5: LOCAL TESTING - Encrypt/Decrypt with YOUR keys
         console.log("\n=== LOCAL ENCRYPTION/DECRYPTION TEST ===");
@@ -561,9 +591,9 @@ export const generateEbrcCurlParams = async (payload) => {
             console.log("Decrypted secret key:", decryptedSecret);
             console.log("Keys match:", keysMatch ? "YES" : "NO");
 
-            console.log("🔑 Original secret key:", encryptionResult.secretKey);
-            console.log("🔑 Decrypted secret key:", decryptedSecret);
-            console.log("🔑 Keys match:", decryptedSecret === encryptionResult.secretKey);
+            console.log(" Original secret key:", encryptionResult.secretKey);
+            console.log(" Decrypted secret key:", decryptedSecret);
+            console.log(" Keys match:", decryptedSecret === encryptionResult.secretKey);
 
             if (!keysMatch) {
                 throw new Error("Local encryption/decryption test FAILED - keys don't match!");
