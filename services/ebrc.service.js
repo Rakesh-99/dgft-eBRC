@@ -6,9 +6,10 @@ const clientSecret = process.env.CLIENT_SECRET;
 const baseUrl = process.env.DGFT_SANDBOX_URL;
 const apiKey = process.env.X_API_KEY;
 const clientId = process.env.CLIENT_ID;
-const userPrivateKey = process.env.USER_PRIVATE_KEY;
-const dgftPublicKey = process.env.DGFT_PUBLIC_KEY;
+const userPrivateKey = (process.env.USER_PRIVATE_KEY || '').trim();
+const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').trim();
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
+const userPublicKey = (process.env.USER_PUBLIC_KEY || '').trim();
 
 // Currency codes from DGFT specification
 const VALID_CURRENCY_CODES = [
@@ -216,22 +217,16 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
             cipher.final()
         ]);
 
-        // Get the 16-byte authentication tag
-        const authTag = cipher.getAuthTag();
+     
 
-        if (authTag.length !== 16) {
-            throw new Error(`Auth tag length is ${authTag.length}, expected 16`);
-        }
-
-        // Final structure: IV (12) + Salt (32) + Ciphertext + AuthTag (16)
-        const finalBuffer = Buffer.concat([iv, salt, ciphertext, authTag]);
+        // Final structure: IV (12) + Salt (32) + Ciphertext
+        const finalBuffer = Buffer.concat([iv, salt, ciphertext]);
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
             iv,
             salt,
             ciphertext,
-            authTag
         };
     } catch (error) {
         console.error("AES-GCM encryption error:", error.message);
@@ -262,22 +257,15 @@ function encryptAESKey(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        const pem = dgftPublicKey.trim();
-        let publicKey;
-        if (pem.includes('\n')) {
-            publicKey = pem;
-        } else {
-            const begin = "-----BEGIN PUBLIC KEY-----";
-            const end = "-----END PUBLIC KEY-----";
-            if (!pem.startsWith(begin) || !pem.endsWith(end)) {
-                throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
-            }
-            const keyData = pem.substring(begin.length, pem.length - end.length).replace(/\s/g, '');
-            const formattedKeyData = keyData.match(/.{1,64}/g)?.join('\n') || keyData;
-            publicKey = `${begin}\n${formattedKeyData}\n${end}`;
+        const publicKey = dgftPublicKey.trim();
+        if (
+            !publicKey.startsWith("-----BEGIN PUBLIC KEY-----") ||
+            !publicKey.endsWith("-----END PUBLIC KEY-----")
+        ) {
+            throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
         }
 
-        //  OAEP with SHA - 256 for both OAEP and MGF1
+        // OAEP with SHA-256 for both OAEP and MGF1
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: publicKey,
@@ -291,7 +279,6 @@ function encryptAESKey(secretKey) {
         const encryptedKeyBase64 = encryptedKey.toString('base64');
         console.log(`Encrypted secret key length: ${encryptedKey.length} bytes`);
 
-
         return encryptedKeyBase64;
     } catch (error) {
         console.error("AES key encryption failed:", error.message);
@@ -303,7 +290,7 @@ function encryptAESKey(secretKey) {
 // Encrypt secret key using DGFT public key to test in local machine : 
 function encryptAESKeyForLocalTesting(secretKey) {
     try {
-        const userPublicKey = process.env.USER_PUBLIC_KEY;
+
 
         if (!userPublicKey) {
             throw new Error("USER_PUBLIC_KEY not found in environment");
@@ -313,26 +300,13 @@ function encryptAESKeyForLocalTesting(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        // Format the public key properly
-        const pem = userPublicKey.trim();
-        let publicKey;
-        if (pem.includes('\n')) {
-            publicKey = pem;
-        } else {
-            const begin = "-----BEGIN PUBLIC KEY-----";
-            const end = "-----END PUBLIC KEY-----";
-            if (!pem.startsWith(begin) || !pem.endsWith(end)) {
-                throw new Error("USER_PUBLIC_KEY must be in PEM format");
-            }
-            const keyData = pem.substring(begin.length, pem.length - end.length).replace(/\s/g, '');
-            const formattedKeyData = keyData.match(/.{1,64}/g)?.join('\n') || keyData;
-            publicKey = `${begin}\n${formattedKeyData}\n${end}`;
+        if (!userPublicKey.startsWith("-----BEGIN PUBLIC KEY-----") || !userPublicKey.endsWith("-----END PUBLIC KEY-----")) {
+            throw new Error("USER_PUBLIC_KEY must be in PEM format");
         }
 
-        // Encrypt with YOUR public key using OAEP
         const encryptedKey = crypto.publicEncrypt(
             {
-                key: publicKey,
+                key: userPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
                 mgf1Hash: "sha256"
@@ -565,7 +539,6 @@ export const generateEbrcCurlParams = async (payload) => {
         console.log("IV (base64):", encryptionResult.iv?.toString('base64'));
         console.log("AES Key (hex):", createAES256Key(encryptionResult.secretKey, encryptionResult.salt).toString('hex'));
         console.log("Ciphertext (base64):", encryptionResult.ciphertext?.toString('base64'));
-        console.log("AuthTag (base64):", encryptionResult.authTag?.toString('base64'));
         console.log("Final Encrypted Buffer (base64):", encryptionResult.finalBuffer?.substring(0, 60), "... (length:", encryptionResult.finalBuffer?.length, ")");
 
         // Step 4: Encrypt AES key with DGFT's public key (for production API)
