@@ -7,7 +7,7 @@ const baseUrl = process.env.DGFT_SANDBOX_URL;
 const apiKey = process.env.X_API_KEY;
 const clientId = process.env.CLIENT_ID;
 const userPrivateKey = process.env.USER_PRIVATE_KEY;
-const dgftPublicKey = process.env.DGFT_PUBLIC_KEY;
+const dgftPublicKey = process.env.DGFT_PUBLIC_KEY.replace(/^"|"$/g, '').trim();
 const accessTokenBaseUrl = process.env.ACCESS_TOKEN_URL;
 
 // Currency codes from DGFT specification
