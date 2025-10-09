@@ -285,6 +285,10 @@ function encryptAESKey(secretKey) {
         if (secretKey.length !== 32) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
+        // check for printable ASCII -----------------> 
+        if (!/^[\x20-\x7E]{32}$/.test(secretKey)) {
+            throw new Error("Secret key must be 32 printable ASCII characters");
+        }
         console.log("Secret key to encrypt:", secretKey);
         console.log("Secret key length:", secretKey.length);
 
