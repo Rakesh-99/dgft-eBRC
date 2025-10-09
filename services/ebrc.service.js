@@ -3,15 +3,21 @@ import dotenv from 'dotenv';
 dotenv.config();
 import crypto from "crypto";
 
+
+const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').replace(/\\n/g, '\n').trim();
+const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
+const userPrivateKey = userPrivateKeyBase64
+    ? `-----BEGIN PRIVATE KEY-----\n${userPrivateKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`
+    : '';
+const userPublicKeyBase64 = (process.env.USER_PUBLIC_KEY || '').trim();
+const userPublicKey = userPublicKeyBase64
+    ? `-----BEGIN PUBLIC KEY-----\n${userPublicKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`
+    : '';
 const clientSecret = (process.env.CLIENT_SECRET || '').trim();
 const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
 const apiKey = (process.env.X_API_KEY || '').trim();
 const clientId = (process.env.CLIENT_ID || '').trim();
-const userPrivateKey = (process.env.USER_PRIVATE_KEY || '').trim();
-const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').trim();
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
-const userPublicKey = (process.env.USER_PUBLIC_KEY || '').trim();
-
 
 // Currency codes from DGFT specification
 const VALID_CURRENCY_CODES = [
@@ -234,57 +240,14 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
 
 // step 5:  Digital signature helper fn() ------> 
 function createDigitalSignature(dataToSign) {
-    try {
-        const signer = crypto.createSign("RSA-SHA256");
-        signer.update(dataToSign, 'utf8');  // Sign the Base64 encoded JSON (Step 2 output)
-        const signature = signer.sign(userPrivateKey, "base64");
-        return signature;
-    } catch (error) {
-        throw new Error(`Digital signature creation failed: ${error.message}`);
-    }
+    const signer = crypto.createSign("RSA-SHA256");
+    signer.update(dataToSign, 'utf8');
+    const signature = signer.sign(userPrivateKey, "base64");
+    return signature;
 }
 
 
 // Step 6 :  Encrypt secret key using DGFT public key 
-// function encryptAESKey(secretKey) {
-//     try {
-//         if (!dgftPublicKey) {
-//             throw new Error("DGFT_PUBLIC_KEY not found in environment");
-//         }
-//         if (secretKey.length !== 32) {
-//             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
-//         }
-
-//         const publicKey = dgftPublicKey.trim();
-//         if (
-//             !publicKey.startsWith("-----BEGIN PUBLIC KEY-----") ||
-//             !publicKey.endsWith("-----END PUBLIC KEY-----")
-//         ) {
-//             throw new Error("DGFT_PUBLIC_KEY must be in PEM format");
-//         }
-
-//         const encryptedKey = crypto.publicEncrypt(
-//             {
-//                 key: publicKey,
-//                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-//                 oaepHash: "sha256",
-//                 mgf1Hash: "sha256",
-//                 oaepLabel: Buffer.alloc(0)
-//             },
-//             Buffer.from(secretKey, 'utf8')
-//         );
-//         console.log(" secretVal RAW buffer length:", encryptedKey.length);
-//         console.log(" secretVal BASE64 length:", encryptedKey.toString('base64').length);
-
-//         return encryptedKey.toString('base64');
-//     } catch (error) {
-//         console.error("AES key encryption failed:", error.message);
-//         throw new Error(`Failed to encrypt secret key: ${error.message}`);
-//     }
-// }
-
-
-// alt approach for using direct cer file : 
 function encryptAESKey(secretKey) {
     try {
         if (!dgftPublicKey) {
@@ -294,27 +257,7 @@ function encryptAESKey(secretKey) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
 
-        let keyInput = dgftPublicKey.trim();
-        
-        // Debug: Log the raw value to confirm
-        console.log("Raw dgftPublicKey from env (first 50 chars):", keyInput.substring(0, 50));
-        
-        // Strip outer quotes if present (from .env)
-        if (keyInput.startsWith('"') && keyInput.endsWith('"')) {
-            keyInput = keyInput.slice(1, -1);
-            console.log("After stripping quotes (first 50 chars):", keyInput.substring(0, 50));
-        }
-
-        let publicKey;
-        // Handle certificate or public key PEM
-        if (keyInput.startsWith("-----BEGIN CERTIFICATE-----")) {
-            publicKey = crypto.createPublicKey(keyInput);  // Load certificate and derive public key
-        } else if (keyInput.startsWith("-----BEGIN PUBLIC KEY-----")) {
-            publicKey = keyInput;  // Direct PEM
-        } else {
-            console.log("keyInput does not start with certificate or public key header. Full keyInput (first 100):", keyInput.substring(0, 100));
-            throw new Error("DGFT_PUBLIC_KEY must be a certificate or public key in PEM format");
-        }
+        const publicKey = dgftPublicKey.trim();
 
         const encryptedKey = crypto.publicEncrypt(
             {
@@ -336,11 +279,11 @@ function encryptAESKey(secretKey) {
     }
 }
 
+
+
 // Encrypt secret key using DGFT public key to test in local machine : 
 function encryptAESKeyForLocalTesting(secretKey) {
     try {
-
-
         if (!userPublicKey) {
             throw new Error("USER_PUBLIC_KEY not found in environment");
         }
@@ -348,11 +291,6 @@ function encryptAESKeyForLocalTesting(secretKey) {
         if (secretKey.length !== 32) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
-
-        if (!userPublicKey.startsWith("-----BEGIN PUBLIC KEY-----") || !userPublicKey.endsWith("-----END PUBLIC KEY-----")) {
-            throw new Error("USER_PUBLIC_KEY must be in PEM format");
-        }
-
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: userPublicKey,
