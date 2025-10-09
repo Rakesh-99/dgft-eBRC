@@ -26,25 +26,7 @@ const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
 
 
 
-function extractPublicKeyFromCert(certPem) {
-    try {
 
-        const cleanCert = certPem
-            .replace(/^\uFEFF/, '')
-            .replace(/^"/, '')
-            .replace(/"$/, '')
-            .trim();
-
-        const cert = new crypto.X509Certificate(cleanCert);
-        return cert.publicKey.export({
-            type: 'spki',
-            format: 'pem'
-        });
-    } catch (error) {
-        console.error("Failed to extract public key from certificate:", error.message);
-        throw new Error(`Certificate parsing failed: ${error.message}`);
-    }
-}
 
 // Currency codes from DGFT specification
 const VALID_CURRENCY_CODES = [
@@ -292,17 +274,14 @@ function encryptAESKey(secretKey) {
         console.log("Secret key to encrypt:", secretKey);
         console.log("Secret key length:", secretKey.length);
 
-        const publicKeyPem = extractPublicKeyFromCert(dgftPublicKey);
-        console.log("Public key extracted successfully");
 
         // RSA-OAEP with SHA-256 
         const encryptedKey = crypto.publicEncrypt(
             {
-                key: publicKeyPem,
+                key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
                 mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0)
             },
             Buffer.from(secretKey, 'utf8')  // Plain 32-char secret as UTF-8
         );
@@ -319,62 +298,6 @@ function encryptAESKey(secretKey) {
         throw new Error(`Failed to encrypt secret key: ${error.message}`);
     }
 }
-
-
-// Encrypt secret key using DGFT public key to test in local machine : 
-function encryptAESKeyForLocalTesting(secretKey) {
-    try {
-        if (!userPublicKey) {
-            throw new Error("USER_PUBLIC_KEY not found in environment");
-        }
-
-        if (secretKey.length !== 32) {
-            throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
-        }
-        const encryptedKey = crypto.publicEncrypt(
-            {
-                key: userPublicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256",
-                mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0)
-            },
-            Buffer.from(secretKey, 'utf8')
-        );
-
-        const encryptedKeyBase64 = encryptedKey.toString('base64');
-        console.log(`Local test - Encrypted secret key length: ${encryptedKey.length} bytes`);
-
-        return encryptedKeyBase64;
-    } catch (error) {
-        console.error("Local encryption failed:", error.message);
-        throw new Error(`Failed to encrypt secret key for local testing: ${error.message}`);
-    }
-}
-
-function decryptSecretVal(encryptedSecretValBase64, privateKey) {
-    try {
-        const encryptedBuffer = Buffer.from(encryptedSecretValBase64, 'base64');
-
-        const decrypted = crypto.privateDecrypt(
-            {
-                key: privateKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256",
-                mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0)
-            },
-            encryptedBuffer
-        );
-
-        return decrypted.toString('utf8');
-    } catch (error) {
-        console.error("Decryption failed:", error.message);
-        throw new Error(`Failed to decrypt secret value: ${error.message}`);
-    }
-}
-
-
 
 //  encryption process 
 async function encryptPayload(payload) {
