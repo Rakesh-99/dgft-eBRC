@@ -4,12 +4,7 @@ config();
 import crypto from "crypto";
 
 
-const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '')
-    .replace(/^\uFEFF/, '')
-    .replace(/^"/, '')
-    .replace(/"$/, '')
-    .replace(/\\n/g, '\n')
-    .trim();
+const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').trim();
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
 const userPrivateKey = userPrivateKeyBase64
     ? `-----BEGIN PRIVATE KEY-----\n${userPrivateKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`
@@ -23,8 +18,6 @@ const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
 const apiKey = (process.env.X_API_KEY || '').trim();
 const clientId = (process.env.CLIENT_ID || '').trim();
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
-
-
 
 
 

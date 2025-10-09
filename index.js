@@ -1,6 +1,6 @@
 import express from 'express';
-import dotenv from 'dotenv';
-dotenv.config();
+import { config } from '@dotenvx/dotenvx';
+config();
 const app = express();
 import ebrcRoutes from './routers/ebrc.routes.js';
 const port = process.env.PORT || 8050;
