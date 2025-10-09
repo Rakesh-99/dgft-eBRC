@@ -230,43 +230,28 @@ function createAES256Key(secretKey, salt) {
     );
 };
 
+// encryptPayloadAESGCM 
+
 // Step 4: AES-GCM encryption helper fn()
 async function encryptPayloadAESGCM(payloadBase64, secretKey) {
     try {
-   
-        console.log("Input length:", payloadBase64.length);
-        console.log("Secret key:", secretKey);
-
-        // Generate salt (32 bytes) - matching Java implementation
         const salt = await generateSalt();
-        console.log("Salt generated:", salt.toString('utf8'));
-
-        // Create AES key using PBKDF2 - matching Java parameters
         const aes256Key = createAES256Key(secretKey, salt);
-        console.log("AES key derived");
-
-        // Generate 12-byte IV - matching Java IV_LENGTH_BYTE = 12
         const iv = crypto.randomBytes(12);
-        console.log("IV generated:", iv.toString('hex'));
 
-        // AES-GCM encryption - matching Java "AES/GCM/NoPadding"
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
-        
-        // Update and finalize
-        const encrypted = cipher.update(payloadBase64, 'utf8');  // Don't convert to Buffer here
+
+        // In Node.js crypto, cipher.final() already includes the auth tag
+        const encrypted = cipher.update(payloadBase64, 'utf8');
         const final = cipher.final();
-        
-        // Get authentication tag (16 bytes for GCM)
-        const authTag = cipher.getAuthTag();
-        
-        // Combine encrypted data + auth tag
-        const ciphertext = Buffer.concat([encrypted, final, authTag]);
+
+        const ciphertext = Buffer.concat([encrypted, final]);
 
         const finalBuffer = Buffer.concat([iv, salt, ciphertext]);
 
         console.log("AES-GCM encryption completed:");
-        console.log("- IV length:", iv.length, "bytes");
-        console.log("- Salt length:", salt.length, "bytes");
+        console.log("- IV length:", iv.length, "bytes (12)");
+        console.log("- Salt length:", salt.length, "bytes (32)");
         console.log("- Ciphertext+Tag length:", ciphertext.length, "bytes");
         console.log("- Final buffer length:", finalBuffer.length, "bytes");
 
