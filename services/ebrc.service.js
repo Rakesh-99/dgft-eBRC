@@ -212,7 +212,6 @@ function createAES256Key(secretKey, salt) {
     );
 };
 
-// encryptPayloadAESGCM 
 
 // Step 4: AES-GCM encryption helper fn()
 async function encryptPayloadAESGCM(payloadBase64, secretKey) {
@@ -315,7 +314,8 @@ async function encryptPayload(payload) {
     console.log("3. Generated 32-character secret key:", secretKey);
 
     // Step 4: Encrypt with AES-GCM
-    const encryptionResult = await encryptPayloadAESGCM(payloadBase64, secretKey);
+    const payloadBase64String = String(payloadBase64);
+    const encryptionResult = await encryptPayloadAESGCM(payloadBase64String, secretKey);
     console.log("4. Encrypted payload using AES-256-GCM");
 
     // Step 5: Sign the BASE64 encoded data (NOT the encrypted data)
