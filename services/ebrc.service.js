@@ -4,7 +4,12 @@ dotenv.config();
 import crypto from "crypto";
 
 
-const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').replace(/\\n/g, '\n').trim();
+const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '')
+    .replace(/^\uFEFF/, '')
+    .replace(/^"/, '')
+    .replace(/"$/, '')
+    .replace(/\\n/g, '\n')
+    .trim();
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
 const userPrivateKey = userPrivateKeyBase64
     ? `-----BEGIN PRIVATE KEY-----\n${userPrivateKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`
@@ -18,6 +23,28 @@ const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
 const apiKey = (process.env.X_API_KEY || '').trim();
 const clientId = (process.env.CLIENT_ID || '').trim();
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
+
+
+
+function extractPublicKeyFromCert(certPem) {
+    try {
+
+        const cleanCert = certPem
+            .replace(/^\uFEFF/, '')
+            .replace(/^"/, '')
+            .replace(/"$/, '')
+            .trim();
+
+        const cert = new crypto.X509Certificate(cleanCert);
+        return cert.publicKey.export({
+            type: 'spki',
+            format: 'pem'
+        });
+    } catch (error) {
+        console.error("Failed to extract public key from certificate:", error.message);
+        throw new Error(`Certificate parsing failed: ${error.message}`);
+    }
+}
 
 // Currency codes from DGFT specification
 const VALID_CURRENCY_CODES = [
@@ -206,31 +233,48 @@ function createAES256Key(secretKey, salt) {
 // Step 4: AES-GCM encryption helper fn()
 async function encryptPayloadAESGCM(payloadBase64, secretKey) {
     try {
-        // Generate salt first
+   
+        console.log("Input length:", payloadBase64.length);
+        console.log("Secret key:", secretKey);
+
+        // Generate salt (32 bytes) - matching Java implementation
         const salt = await generateSalt();
+        console.log("Salt generated:", salt.toString('utf8'));
 
-        // Create AES key using the salt
+        // Create AES key using PBKDF2 - matching Java parameters
         const aes256Key = createAES256Key(secretKey, salt);
+        console.log("AES key derived");
 
-        // Generate 12-byte IV
+        // Generate 12-byte IV - matching Java IV_LENGTH_BYTE = 12
         const iv = crypto.randomBytes(12);
+        console.log("IV generated:", iv.toString('hex'));
 
+        // AES-GCM encryption - matching Java "AES/GCM/NoPadding"
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
+        
+        // Update and finalize
+        const encrypted = cipher.update(payloadBase64, 'utf8');  // Don't convert to Buffer here
+        const final = cipher.final();
+        
+        // Get authentication tag (16 bytes for GCM)
+        const authTag = cipher.getAuthTag();
+        
+        // Combine encrypted data + auth tag
+        const ciphertext = Buffer.concat([encrypted, final, authTag]);
 
-        // Encrypt the data
-        const ciphertext = Buffer.concat([
-            cipher.update(payloadBase64, 'utf8'),
-            cipher.final()
-        ]);
-
-        // Final structure: IV (12) + Salt (32) + Ciphertext
         const finalBuffer = Buffer.concat([iv, salt, ciphertext]);
+
+        console.log("AES-GCM encryption completed:");
+        console.log("- IV length:", iv.length, "bytes");
+        console.log("- Salt length:", salt.length, "bytes");
+        console.log("- Ciphertext+Tag length:", ciphertext.length, "bytes");
+        console.log("- Final buffer length:", finalBuffer.length, "bytes");
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
             iv,
             salt,
-            ciphertext,
+            ciphertext
         };
     } catch (error) {
         console.error("AES-GCM encryption error:", error.message);
@@ -247,7 +291,7 @@ function createDigitalSignature(dataToSign) {
 }
 
 
-// Step 6 :  Encrypt secret key using DGFT public key 
+// Step 6 :  RSA encryption with OAEP parameters
 function encryptAESKey(secretKey) {
     try {
         if (!dgftPublicKey) {
@@ -256,29 +300,35 @@ function encryptAESKey(secretKey) {
         if (secretKey.length !== 32) {
             throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
         }
+        console.log("Secret key to encrypt:", secretKey);
+        console.log("Secret key length:", secretKey.length);
 
-        const publicKey = dgftPublicKey.trim();
+        const publicKeyPem = extractPublicKeyFromCert(dgftPublicKey);
+        console.log("Public key extracted successfully");
 
+        // RSA-OAEP with SHA-256 
         const encryptedKey = crypto.publicEncrypt(
             {
-                key: publicKey,
+                key: publicKeyPem,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256",
-                oaepLabel: Buffer.alloc(0)
+                mgf1Hash: "sha256"
             },
-            Buffer.from(secretKey, 'utf8')
+            Buffer.from(secretKey, 'utf8')  // Plain 32-char secret as UTF-8
         );
-        console.log(" secretVal RAW buffer length:", encryptedKey.length);
-        console.log(" secretVal BASE64 length:", encryptedKey.toString('base64').length);
 
-        return encryptedKey.toString('base64');
+        const encryptedKeyBase64 = encryptedKey.toString('base64');
+        console.log("RSA encryption successful:");
+        console.log(" Ciphertext length:", encryptedKey.length, "bytes");
+        console.log(" Base64 length:", encryptedKeyBase64.length, "chars");
+        console.log(" Base64 (first 60):", encryptedKeyBase64.substring(0, 60));
+
+        return encryptedKeyBase64;
     } catch (error) {
-        console.error("AES key encryption failed:", error.message);
+        console.error("RSA encryption failed:", error.message);
         throw new Error(`Failed to encrypt secret key: ${error.message}`);
     }
 }
-
 
 
 // Encrypt secret key using DGFT public key to test in local machine : 
@@ -338,7 +388,6 @@ function decryptSecretVal(encryptedSecretValBase64, privateKey) {
 
 //  encryption process 
 async function encryptPayload(payload) {
-    console.log("=== STARTING ENCRYPTION PROCESS ===");
 
     // Step 1: Create JSON 
     const payloadJson = JSON.stringify(payload);
@@ -350,17 +399,15 @@ async function encryptPayload(payload) {
 
     // Step 3: Generate 32-character secret key
     const { secretKey } = await generateDynamic32CharSecretKey();
-    console.log("3. Generated 32-character secret key");
+    console.log("3. Generated 32-character secret key:", secretKey);
 
-    // Step 4: Encrypt with AES-GCM (salt generation happens inside)
+    // Step 4: Encrypt with AES-GCM
     const encryptionResult = await encryptPayloadAESGCM(payloadBase64, secretKey);
     console.log("4. Encrypted payload using AES-256-GCM");
 
-    // Step 5: Sign the encoded data generated in step 2
+    // Step 5: Sign the BASE64 encoded data (NOT the encrypted data)
     const digitalSignature = createDigitalSignature(payloadBase64);
-    console.log("5. Created digital signature");
-
-    console.log("=== ENCRYPTION COMPLETED ===");
+    console.log("5. Created digital signature for base64 payload");
 
     return {
         secretKey,
@@ -574,25 +621,49 @@ export const generateEbrcCurlParams = async (payload) => {
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
-        // Validate payload 
+
+
+        // Step 1: Validate payload 
         validatePayload(payload);
+        console.log(" Payload validation passed");
 
-        // Get access token
+        // Step 2: Get access token
         const { accessToken } = await getSandboxToken();
+        console.log(" Access token obtained");
 
-        // Encryption and signature process 
+        // Step 3: Encrypt payload and generate signature
         const encryptionResult = await encryptPayload(payload);
-        const encryptedAESKey = encryptAESKey(encryptionResult.secretKey);
-        const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
+        console.log(" Payload encrypted and signed");
 
+        // Step 4: Encrypt secret key for DGFT (THIS IS THE KEY STEP)
+        const encryptedSecretVal = encryptAESKey(encryptionResult.secretKey);
+        console.log(" Secret key encrypted for DGFT");
+
+        // Step 5: Generate messageID
+        const messageID = payload.requestId || `EBRC-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        // Step 6:  headers 
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
             "client_id": clientId,
-            "secretVal": encryptedAESKey,
             "x-api-key": apiKey,
+            "secretVal": encryptedSecretVal,
+            "messageID": messageID
         };
-        // API call
+
+        console.log("Headers prepared:");
+        Object.keys(headers).forEach(key => {
+            if (key === 'secretVal') {
+                console.log(`- ${key}: ${headers[key].substring(0, 40)}... (${headers[key].length} chars)`);
+            } else if (key === 'accessToken') {
+                console.log(`- ${key}: ${headers[key].substring(0, 20)}... (${headers[key].length} chars)`);
+            } else {
+                console.log(`- ${key}: ${headers[key]}`);
+            }
+        });
+
+        // Step 7: Make API call
         const response = await axios.post(
             `${baseUrl}/pushIRMToGenEBRC`,
             {
@@ -605,8 +676,8 @@ export const fileEbrcService = async (payload) => {
             }
         );
 
-        console.log("eBRC FILING SUCCESS ");
-        console.log("Response Data:", response.data);
+        console.log("eBRC FILING SUCCESS");
+        console.log("Response:", response.data);
 
         return {
             success: true,
@@ -618,11 +689,11 @@ export const fileEbrcService = async (payload) => {
     } catch (error) {
         console.error("=== eBRC FILING ERROR ===");
         if (error.response) {
-            console.error("Error Status:", error.response.status);
-            console.error("Error Data:", error.response.data);
-            console.error("Error Headers:", error.response.headers);
+            console.error("Status:", error.response.status);
+            console.error("Data:", error.response.data);
+            console.error("Headers:", error.response.headers);
         } else {
-            console.error("Error Message:", error.message);
+            console.error("Message:", error.message);
         }
         throw error;
     }
