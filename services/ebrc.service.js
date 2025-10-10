@@ -9,7 +9,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 
-const dgftPublicKey = fs.readFileSync(path.join(__dirname, './keys/dgft_public_key.txt'), 'utf8').trim();
+const dgftPublicKey = fs.readFileSync(path.join(__dirname, '../keys/dgft_public_key.txt'), 'utf8').trim();
+console.log("keys -------------------> ", dgftPublicKey);
+console.log("keys len-------------------> ", dgftPublicKey.length);
+
+
 
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
 const userPrivateKey = userPrivateKeyBase64
