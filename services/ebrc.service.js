@@ -243,9 +243,9 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
 }
 
 // step 5:  Digital signature helper fn() ------> 
-function createDigitalSignature(dataToSign) {
+function createDigitalSignature(base64EncodedData) {
     const signer = crypto.createSign("RSA-SHA256");
-    signer.update(dataToSign, 'utf8');
+    signer.update(base64EncodedData, 'utf8');
     const signature = signer.sign(userPrivateKey, "base64");
     return signature;
 }
@@ -312,9 +312,9 @@ async function encryptPayload(payload) {
     const encryptionResult = await encryptPayloadAESGCM(payloadBase64String, secretKey);
     console.log("4. Encrypted payload using AES-256-GCM");
 
-    // Step 5: Sign the BASE64 encoded data (NOT the encrypted data)
-    const digitalSignature = createDigitalSignature(encryptionResult.finalBuffer);
-    console.log("5. Created digital signature for encrypted data (finalBuffer)");
+    // Step 5: Sign the BASE64 encoded data generated in step 2 : -----------> 
+    const digitalSignature = createDigitalSignature(payloadBase64);
+    console.log("5. Created digital signature for BASE64 encoded data (step 2)");
 
 
     return {
