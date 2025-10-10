@@ -144,55 +144,64 @@ export const getSandboxToken = async () => {
 
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
+// REPLACE THIS FUNCTION
 async function generateDynamic32CharSecretKey() {
     const { ip } = await checkCurrentIP();
     const appName = 'dgft-';
-
     const timestamp = Date.now().toString();
 
     let secretKey = appName + ip + timestamp;
 
-    // keeping only printable keyboard characters
-    secretKey = secretKey.replace(/[^ -~]/g, '');
-
     // Ensure exactly 32 characters
     if (secretKey.length > 32) {
         secretKey = secretKey.substring(0, 32);
-    } else {
-        // Pad with keyboard character (e.g., '0' or 'X')
+    } else if (secretKey.length < 32) {
         secretKey = secretKey.padEnd(32, '0');
     }
-    return { secretKey };
+
+    // Add validation
+    if (secretKey.length !== 32) {
+        throw new Error(`Secret key MUST be 32 chars, got ${secretKey.length}: "${secretKey}"`);
+    }
+
+    const secretKeyBytes = Buffer.from(secretKey, 'utf8');
+    if (secretKeyBytes.length !== 32) {
+        throw new Error(`Secret key byte mismatch: ${secretKeyBytes.length} bytes`);
+    }
+
+    console.log("Generated 32-char secret key:", secretKey);
+    console.log("Secret key length:", secretKey.length);
+    console.log("Secret key bytes:", secretKeyBytes.length);
+
+    return secretKey;
 }
-
-
 
 // Step 4: Generate 32 bytes salt and create AES key helper fn() :
 async function generateSalt() {
     const prefix = 'dgft-';
-    const timestamp = (Date.now() + 1000).toString();
     const { ip } = await checkCurrentIP();
+    const timestamp = (Date.now() + 1000).toString();
 
     let saltString = `${prefix}${ip}${timestamp}`;
 
-    // Ensure exactly 32 characters
+    // CRITICAL: Ensure EXACTLY 32 characters
     if (saltString.length > 32) {
         saltString = saltString.substring(0, 32);
     } else if (saltString.length < 32) {
-        const keyboardChars = '9876543210';
-        let padIndex = 0;
-        while (saltString.length < 32) {
-            saltString += keyboardChars[padIndex % keyboardChars.length];
-            padIndex++;
-        }
+        saltString = saltString.padEnd(32, '0');
     }
 
     if (saltString.length !== 32) {
-        throw new Error(`Salt string must be exactly 32 characters, got ${saltString.length}`);
+        throw new Error(`Salt MUST be 32 chars, got ${saltString.length}: "${saltString}"`);
     }
 
+    console.log("Generated salt:", saltString);
+    console.log("Salt length:", saltString.length);
+
     return Buffer.from(saltString, 'utf8');
-};
+}
+
+
 // Step 4: AES key using the same salt
 function createAES256Key(secretKey, salt) {
     //  PBKDF2 with HMAC-SHA256, 65536 iterations, 256-bit key
@@ -216,10 +225,10 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
 
         const encrypted = cipher.update(payloadBase64, 'utf8');
         const final = cipher.final();
-        const authTag = cipher.getAuthTag(); 
+        const authTag = cipher.getAuthTag();
 
         // Append auth tag to ciphertext
-        const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]); 
+        const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]);
 
         const finalBuffer = Buffer.concat([iv, salt, ciphertextWithTag]);
 
@@ -255,20 +264,34 @@ function createDigitalSignature(base64EncodedData) {
 function encryptAESKey(secretKey) {
     try {
         if (!dgftPublicKey) {
-            throw new Error("DGFT_PUBLIC_KEY not found in environment");
+            throw new Error("DGFT_PUBLIC_KEY not found");
         }
+
+        // CRITICAL VALIDATION
+        console.log("=== SECRET KEY VALIDATION ===");
+        console.log("Secret key string:", secretKey);
+        console.log("Secret key length:", secretKey.length);
+        console.log("Secret key type:", typeof secretKey);
+
+        const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
+        console.log("Secret key buffer length:", secretKeyBuffer.length);
+        console.log("Secret key hex:", secretKeyBuffer.toString('hex'));
+
         if (secretKey.length !== 32) {
-            throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
+            throw new Error(`Secret key MUST be 32 characters, got ${secretKey.length}`);
         }
-        // check for printable ASCII -----------------> 
+
+        if (secretKeyBuffer.length !== 32) {
+            throw new Error(`Secret key MUST be 32 bytes, got ${secretKeyBuffer.length} bytes`);
+        }
+
         if (!/^[\x20-\x7E]{32}$/.test(secretKey)) {
             throw new Error("Secret key must be 32 printable ASCII characters");
         }
-        console.log("Secret key to encrypt:", secretKey);
-        console.log("Secret key length:", secretKey.length);
 
+        console.log("=== RSA ENCRYPTION ===");
 
-        // RSA-OAEP with SHA-256 
+        // RSA-OAEP with SHA-256
         const encryptedKey = crypto.publicEncrypt(
             {
                 key: dgftPublicKey,
@@ -276,46 +299,50 @@ function encryptAESKey(secretKey) {
                 oaepHash: "sha256",
                 mgf1Hash: "sha256",
             },
-            Buffer.from(secretKey, 'utf8')  // Plain 32-char secret as UTF-8
+            secretKeyBuffer
         );
 
         const encryptedKeyBase64 = encryptedKey.toString('base64');
+
         console.log("RSA encryption successful:");
-        console.log(" Ciphertext length:", encryptedKey.length, "bytes");
-        console.log(" Base64 length:", encryptedKeyBase64.length, "chars");
-        console.log(" Base64 (first 60):", encryptedKeyBase64.substring(0, 60));
+        console.log("- Input: 32 bytes");
+        console.log("- Output: ", encryptedKey.length, "bytes");
+        console.log("- Base64:", encryptedKeyBase64.length, "chars");
+        console.log("- Base64 preview:", encryptedKeyBase64.substring(0, 60), "...");
 
         return encryptedKeyBase64;
+
     } catch (error) {
-        console.error("RSA encryption failed:", error.message);
-        throw new Error(`Failed to encrypt secret key: ${error.message}`);
+        console.error("=== RSA ENCRYPTION FAILED ===");
+        console.error("Error:", error.message);
+        console.error("Stack:", error.stack);
+        throw error;
     }
 }
 
 //  encryption process 
 async function encryptPayload(payload) {
+    console.log("\n=== ENCRYPTION PROCESS ===\n");
 
-    // Step 1: Create JSON 
+    // Step 1: Create JSON
     const payloadJson = JSON.stringify(payload);
-    console.log("1. JSON payload created, length:", payloadJson.length);
+    console.log("Step 1: JSON created, length:", payloadJson.length);
 
-    // Step 2: Base64 encode JSON
+    // Step 2: Base64 encode
     const payloadBase64 = Buffer.from(payloadJson, 'utf8').toString('base64');
-    console.log("2. Base64 encoded JSON, length:", payloadBase64.length);
+    console.log("Step 2: Base64 encoded, length:", payloadBase64.length);
 
-    // Step 3: Generate 32-character secret key
-    const { secretKey } = await generateDynamic32CharSecretKey();
-    console.log("3. Generated 32-character secret key:", secretKey);
+    // Step 3: Generate 32-char secret key (FIXED)
+    const secretKey = await generateDynamic32CharSecretKey();
+    console.log("Step 3: Secret key generated");
 
-    // Step 4: Encrypt with AES-GCM
-    const payloadBase64String = String(payloadBase64);
-    const encryptionResult = await encryptPayloadAESGCM(payloadBase64String, secretKey);
-    console.log("4. Encrypted payload using AES-256-GCM");
+    // Step 4: AES-GCM encryption
+    const encryptionResult = await encryptPayloadAESGCM(payloadBase64, secretKey);
+    console.log("Step 4: AES-GCM encrypted");
 
-    // Step 5: Sign the BASE64 encoded data generated in step 2 : -----------> 
+    // Step 5: Sign the Base64 JSON (Step 2 output)
     const digitalSignature = createDigitalSignature(payloadBase64);
-    console.log("5. Created digital signature for BASE64 encoded data (step 2)");
-
+    console.log("Step 5: Digital signature created");
 
     return {
         secretKey,
