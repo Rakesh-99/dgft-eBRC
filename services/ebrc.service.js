@@ -212,28 +212,23 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
         const salt = await generateSalt();
         const aes256Key = createAES256Key(secretKey, salt);
         const iv = crypto.randomBytes(12);
-
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
 
-        // In Node.js crypto, cipher.final() already includes the auth tag
+        // Encrypt
         const encrypted = cipher.update(payloadBase64, 'utf8');
         const final = cipher.final();
+        const authTag = cipher.getAuthTag();
 
-        const ciphertext = Buffer.concat([encrypted, final]);
 
-        const finalBuffer = Buffer.concat([iv, salt, ciphertext]);
+        const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]);
 
-        console.log("AES-GCM encryption completed:");
-        console.log("- IV length:", iv.length, "bytes (12)");
-        console.log("- Salt length:", salt.length, "bytes (32)");
-        console.log("- Ciphertext+Tag length:", ciphertext.length, "bytes");
-        console.log("- Final buffer length:", finalBuffer.length, "bytes");
+        const finalBuffer = Buffer.concat([iv, salt, ciphertextWithTag]);
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
             iv,
             salt,
-            ciphertext
+            ciphertext: ciphertextWithTag
         };
     } catch (error) {
         console.error("AES-GCM encryption error:", error.message);
@@ -312,8 +307,9 @@ async function encryptPayload(payload) {
     console.log("4. Encrypted payload using AES-256-GCM");
 
     // Step 5: Sign the BASE64 encoded data (NOT the encrypted data)
-    const digitalSignature = createDigitalSignature(payloadBase64);
-    console.log("5. Created digital signature for base64 payload");
+    const digitalSignature = createDigitalSignature(encryptionResult.finalBuffer);
+    console.log("5. Created digital signature for encrypted data (finalBuffer)");
+
 
     return {
         secretKey,
@@ -514,7 +510,8 @@ export const generateEbrcCurlParams = async (payload) => {
             secretVal: encryptedAESKeyForAPI,
             messageID,
             data: encryptionResult.encodedData,
-            sign: encryptionResult.digitalSignature
+            sign: encryptionResult.digitalSignature,
+
         };
 
     } catch (error) {
@@ -606,3 +603,77 @@ export const fileEbrcService = async (payload) => {
 };
 
 
+
+
+
+// for local testing only  >>>>>  
+
+
+// encryption  with my own public key : 
+
+function encryptAESKeyForLocalTesting(secretKey) {
+    try {
+        if (!userPublicKey) {
+            throw new Error("USER_PUBLIC_KEY not found in environment");
+        }
+        if (secretKey.length !== 32) {
+            throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
+        }
+        // Check for printable ASCII
+        if (!/^[\x20-\x7E]{32}$/.test(secretKey)) {
+            throw new Error("Secret key must be 32 printable ASCII characters");
+        }
+        console.log("Secret key to encrypt (local test):", secretKey);
+
+        // RSA-OAEP with SHA-256 (must match decryptSecretVal)
+        const encryptedKey = crypto.publicEncrypt(
+            {
+                key: userPublicKey,
+                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                oaepHash: "sha256",
+                mgf1Hash: "sha256",
+            },
+            Buffer.from(secretKey, 'utf8')  // Plain 32-char secret as UTF-8
+        );
+
+        const encryptedKeyBase64 = encryptedKey.toString('base64');
+        console.log("Local RSA encryption successful:");
+        console.log(" Ciphertext length:", encryptedKey.length, "bytes");
+        console.log(" Base64 length:", encryptedKeyBase64.length, "chars");
+
+        return encryptedKeyBase64;
+    } catch (error) {
+        console.error("Local RSA encryption failed:", error.message);
+        throw new Error(`Failed to encrypt secret key locally: ${error.message}`);
+    }
+}
+
+//  Decrypt AES key with YOUR private key (for local testing only)
+function decryptSecretVal(encryptedKeyBase64, privateKey) {
+    try {
+        if (!privateKey) {
+            throw new Error("Private key not provided");
+        }
+        const encryptedKey = Buffer.from(encryptedKeyBase64, 'base64');
+
+        // RSA-OAEP decryption with SHA-256 (must match encryptAESKeyForLocalTesting)
+        const decrypted = crypto.privateDecrypt(
+            {
+                key: privateKey,
+                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                oaepHash: "sha256",
+                mgf1Hash: "sha256",
+            },
+            encryptedKey
+        );
+
+        const decryptedSecret = decrypted.toString('utf8');
+        console.log("Local RSA decryption successful:");
+        console.log(" Decrypted secret length:", decryptedSecret.length, "chars");
+
+        return decryptedSecret;
+    } catch (error) {
+        console.error("Local RSA decryption failed (BadPaddingException?):", error.message);
+        throw new Error(`Failed to decrypt secret key locally: ${error.message}`);
+    }
+}
