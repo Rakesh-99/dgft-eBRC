@@ -214,15 +214,21 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
         const iv = crypto.randomBytes(12);
         const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
 
-        // Encrypt
         const encrypted = cipher.update(payloadBase64, 'utf8');
         const final = cipher.final();
-        const authTag = cipher.getAuthTag();
+        const authTag = cipher.getAuthTag(); 
 
-
-        const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]);
+        // Append auth tag to ciphertext
+        const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]); 
 
         const finalBuffer = Buffer.concat([iv, salt, ciphertextWithTag]);
+
+        console.log("AES-GCM encryption completed:");
+        console.log("- IV length:", iv.length, "bytes (12)");
+        console.log("- Salt length:", salt.length, "bytes (32)");
+        console.log("- Ciphertext length:", encrypted.length + final.length, "bytes");
+        console.log("- Auth tag length:", authTag.length, "bytes (16)");
+        console.log("- Total encrypted payload length:", finalBuffer.length, "bytes");
 
         return {
             finalBuffer: finalBuffer.toString('base64'),
