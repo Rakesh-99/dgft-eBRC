@@ -2,9 +2,15 @@ import axios from "axios";
 import { config } from '@dotenvx/dotenvx';
 config();
 import crypto from "crypto";
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 
-const dgftPublicKey = (process.env.DGFT_PUBLIC_KEY || '').trim();
+const dgftPublicKey = fs.readFileSync(path.join(__dirname, './keys/dgft_public_key.txt'), 'utf8').trim();
+
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
 const userPrivateKey = userPrivateKeyBase64
     ? `-----BEGIN PRIVATE KEY-----\n${userPrivateKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`
@@ -18,7 +24,6 @@ const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
 const apiKey = (process.env.X_API_KEY || '').trim();
 const clientId = (process.env.CLIENT_ID || '').trim();
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
-
 
 
 // Currency codes from DGFT specification
