@@ -153,63 +153,16 @@ export const getSandboxToken = async () => {
 
 
 // Step 3: Generate a 32 characters plain text dynamic key. helper fn() : 
-// REPLACE THIS FUNCTION
 async function generateDynamic32CharSecretKey() {
-    const { ip } = await checkCurrentIP();
-    const appName = 'dgft-';
-    const timestamp = Date.now().toString();
+    const keyboardChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let secretKey = '';
 
-    let secretKey = appName + ip + timestamp;
-
-    // Ensure exactly 32 characters
-    if (secretKey.length > 32) {
-        secretKey = secretKey.substring(0, 32);
-    } else if (secretKey.length < 32) {
-        secretKey = secretKey.padEnd(32, '0');
+    for (let i = 0; i < 32; i++) {
+        const randomIndex = Math.floor(Math.random() * keyboardChars.length);
+        secretKey = secretKey + keyboardChars[randomIndex];
     }
-
-    // Add validation
-    if (secretKey.length !== 32) {
-        throw new Error(`Secret key MUST be 32 chars, got ${secretKey.length}: "${secretKey}"`);
-    }
-
-    const secretKeyBytes = Buffer.from(secretKey, 'utf8');
-    if (secretKeyBytes.length !== 32) {
-        throw new Error(`Secret key byte mismatch: ${secretKeyBytes.length} bytes`);
-    }
-
-    console.log("Generated 32-char secret key:", secretKey);
-    console.log("Secret key length:", secretKey.length);
-    console.log("Secret key bytes:", secretKeyBytes.length);
-
     return secretKey;
 }
-
-// Step 4: Generate 32 bytes salt and create AES key helper fn() :
-async function generateSalt() {
-    const prefix = 'dgft-';
-    const { ip } = await checkCurrentIP();
-    const timestamp = (Date.now() + 1000).toString();
-
-    let saltString = `${prefix}${ip}${timestamp}`;
-
-    // CRITICAL: Ensure EXACTLY 32 characters
-    if (saltString.length > 32) {
-        saltString = saltString.substring(0, 32);
-    } else if (saltString.length < 32) {
-        saltString = saltString.padEnd(32, '0');
-    }
-
-    if (saltString.length !== 32) {
-        throw new Error(`Salt MUST be 32 chars, got ${saltString.length}: "${saltString}"`);
-    }
-
-    console.log("Generated salt:", saltString);
-    console.log("Salt length:", saltString.length);
-
-    return Buffer.from(saltString, 'utf8');
-}
-
 
 // Step 4: AES key using the same salt
 function createAES256Key(secretKey, salt) {
@@ -226,38 +179,24 @@ function createAES256Key(secretKey, salt) {
 
 // Step 4: AES-GCM encryption helper fn()
 async function encryptPayloadAESGCM(payloadBase64, secretKey) {
-    try {
-        const salt = await generateSalt();
-        const aes256Key = createAES256Key(secretKey, salt);
-        const iv = crypto.randomBytes(12);
-        const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
+    const salt = crypto.randomBytes(32);
+    const aes256Key = createAES256Key(secretKey, salt); 
+    const iv = crypto.randomBytes(12);
 
-        const encrypted = cipher.update(payloadBase64, 'utf8');
-        const final = cipher.final();
-        const authTag = cipher.getAuthTag();
+    const cipher = crypto.createCipheriv('aes-256-gcm', aes256Key, iv);
+    const encrypted = cipher.update(payloadBase64, 'utf8');
+    const final = cipher.final();
+    const authTag = cipher.getAuthTag();
 
-        // Append auth tag to ciphertext
-        const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]);
+    const ciphertextWithTag = Buffer.concat([encrypted, final, authTag]);
+    const finalBuffer = Buffer.concat([iv, salt, ciphertextWithTag]); // iv(12) + salt(32) + ct + tag
 
-        const finalBuffer = Buffer.concat([iv, salt, ciphertextWithTag]);
-
-        console.log("AES-GCM encryption completed:");
-        console.log("- IV length:", iv.length, "bytes (12)");
-        console.log("- Salt length:", salt.length, "bytes (32)");
-        console.log("- Ciphertext length:", encrypted.length + final.length, "bytes");
-        console.log("- Auth tag length:", authTag.length, "bytes (16)");
-        console.log("- Total encrypted payload length:", finalBuffer.length, "bytes");
-
-        return {
-            finalBuffer: finalBuffer.toString('base64'),
-            iv,
-            salt,
-            ciphertext: ciphertextWithTag
-        };
-    } catch (error) {
-        console.error("AES-GCM encryption error:", error.message);
-        throw new Error(`AES-GCM encryption failed: ${error.message}`);
-    }
+    return {
+        finalBuffer: finalBuffer.toString('base64'),
+        iv,
+        salt,
+        ciphertext: ciphertextWithTag
+    };
 }
 
 // step 5:  Digital signature helper fn() ------> 
@@ -350,7 +289,7 @@ async function encryptPayload(payload) {
     console.log("Step 4: AES-GCM encrypted");
 
     // Step 5: Sign the Base64 JSON (Step 2 output)
-    const digitalSignature = createDigitalSignature(payloadBase64);
+    const digitalSignature = createDigitalSignature(encryptionResult.finalBuffer);
     console.log("Step 5: Digital signature created");
 
     return {
