@@ -10,7 +10,7 @@ const __dirname = path.dirname(__filename);
 
 
 // Dgft public key : 
-const dgftPublicKey = fs.readFileSync(path.join(__dirname, '../keys/dgft_public_key.txt'), 'utf8').trim();
+const dgftPublicKey = fs.readFileSync(path.join(__dirname, '../keys/dgft_public_key.txt'), 'utf8');
 
 // userPrivate key : 
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
