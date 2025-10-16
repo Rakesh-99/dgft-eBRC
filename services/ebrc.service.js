@@ -207,13 +207,17 @@ async function encryptPayloadAESGCM(payloadBase64, secretKey) {
 
 
 // Step 4: AES 256 bits key 
-const createAES256Key = crypto.pbkdf2Sync(
-    secretKey,      // 32-char string from Step 3
-    saltBuffer,     // 32-byte Buffer (from 32 ASCII chars)
-    65536,          // iterations
-    32,             // 256 bits = 32 bytes
-    'sha256'        // HMAC hash
-);
+function createAES256Key(secretKey, salt) {
+    // salt can be string (ASCII) or Buffer
+    const saltBuffer = typeof salt === 'string' ? Buffer.from(salt, 'ascii') : salt;
+    return crypto.pbkdf2Sync(
+        secretKey,
+        saltBuffer,
+        65536,
+        32,
+        'sha256'
+    );
+}
 
 
 // step 5:  Digital signature helper fn() ------> 
