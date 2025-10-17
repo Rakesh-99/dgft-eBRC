@@ -10,7 +10,10 @@ const __dirname = path.dirname(__filename);
 
 
 // Dgft public key : 
-const dgftPublicKey = fs.readFileSync(path.join(__dirname, '../keys/dgft_public_key.txt'), 'utf8');
+const dgftPublicKey = fs.readFileSync(path.join(__dirname, '../keys/dgft_extracted_public_key.pem'), 'utf8');
+
+console.log("DGFT public key --> ", dgftPublicKey);
+
 
 // userPrivate key : 
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
@@ -32,8 +35,7 @@ const clientId = (process.env.CLIENT_ID || '').trim();
 
 // URL for generating access token : 
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
-console.log("Node.js version:", process.version);
-console.log("OpenSSL version:", crypto.constants.OPENSSL_VERSION);
+
 
 // Currency codes from DGFT specification
 const VALID_CURRENCY_CODES = [
