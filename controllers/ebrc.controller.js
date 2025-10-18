@@ -3,7 +3,6 @@ import expressAsyncHandler from 'express-async-handler';
 import {
     fileEbrcService,
     getSandboxToken,
-    generateEbrcCurlParams
 
 } from "../services/ebrc.service.js";
 
@@ -24,37 +23,6 @@ export const getToken = async (req, res) => {
         });
     }
 };
-
-
-
-// gen ebrc cur; fn() for getting encrypted values :
-export const generateCurlValues = async (req, res) => {
-    try {
-        const payload = req.body;
-
-        // Call the service function to generate cURL parameters
-        const curlParams = await generateEbrcCurlParams(payload);
-
-        return res.json({
-            success: true,
-            data: curlParams,
-            message: "cURL parameters generated successfully"
-        });
-    } catch (error) {
-        console.error("Controller error:", error.message);
-        return res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
-}
-
-
-
-
-
-
-
 
 
 // Main eBRC filing function
