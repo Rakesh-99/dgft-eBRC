@@ -88,7 +88,7 @@ const VALID_PURPOSE_CODES = [
     'S1501', 'S1502', 'S1504'
 ];
 
-// Utility: Check current public IP
+// utility: Check current public IP
 export const checkCurrentIP = async () => {
     try {
         const response = await fetch('https://api.ipify.org?format=json', {
@@ -184,43 +184,47 @@ async function getPublicIPv4() {
 // Step 3: Generate 32-char secret key 
 async function generateDynamic32CharSecretKey() {
     const appName = "shipzy";
-
     const ip = await getPublicIPv4();
-    const timestamp = Date.now().toString();
+    const timestamp = Date.now().toString().slice(-10);
 
-    let secretKey = `${appName}-${ip}${timestamp}`;
-    // Use all printable ASCII keyboard characters for padding
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:',.<>/?";
-    while (secretKey.length < 32) {
-        secretKey += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    if (secretKey.length > 32) {
-        secretKey = secretKey.substring(0, 32);
+    let base = `${appName}-${ip}-${timestamp}`;
+
+    // Pad or truncate to exactly 32
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+    if (base.length < 32) {
+        while (base.length < 32) {
+            base += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+    } else if (base.length > 32) {
+        base = base.substring(0, 32);
     }
 
-    if (secretKey.length !== 32) {
-        throw new Error(`Secret key must be 32 characters long, got ${secretKey.length}`);
+    // Final safety check
+    if (base.length !== 32 || !/^[\x20-\x7E]{32}$/.test(base)) {
+        throw new Error("Failed to generate valid 32-char key");
     }
-    return secretKey;
+
+    return base;
 }
-
 async function generateSalt32ASCII() {
     const appName = "shipzy";
     const ip = await getPublicIPv4();
-    const timestamp = (Date.now() + 1000).toString();
+    const timestamp = (Date.now() + 1000).toString().slice(-10);
 
-    let salt = `${appName}-${ip}${timestamp}`;
-    // Use all printable ASCII keyboard characters for padding
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:',.<>/?";
-    while (salt.length < 32) {
-        salt += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    if (salt.length > 32) {
+    let salt = `${appName}-${ip}-${timestamp}`;
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+    if (salt.length < 32) {
+        while (salt.length < 32) {
+            salt += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+    } else if (salt.length > 32) {
         salt = salt.substring(0, 32);
     }
 
-    if (salt.length !== 32) {
-        throw new Error(`Salt must be 32 characters long, got ${salt.length}`);
+    if (salt.length !== 32 || !/^[\x20-\x7E]{32}$/.test(salt)) {
+        throw new Error(`Invalid salt generated: ${salt}`);
     }
 
     return salt;
