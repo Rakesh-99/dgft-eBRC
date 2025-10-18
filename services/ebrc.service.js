@@ -18,19 +18,24 @@ console.log("DGFT public key --> ", dgftPublicKey);
 // userPrivate key : 
 const userPrivateKeyBase64 = (process.env.USER_PRIVATE_KEY || '').trim();
 const userPrivateKey = userPrivateKeyBase64
-    ? `-----BEGIN PRIVATE KEY-----\n${userPrivateKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PRIVATE KEY-----`
+    ? `-----BEGIN PRIVATE KEY-----\n${userPrivateKeyBase64.replace(/\s/g, '').match(/.{1,64}/g)?.join('\n')}\n-----END PRIVATE KEY-----`
     : '';
+
 // user public key : 
 const userPublicKeyBase64 = (process.env.USER_PUBLIC_KEY || '').trim();
 const userPublicKey = userPublicKeyBase64
-    ? `-----BEGIN PUBLIC KEY-----\n${userPublicKeyBase64.match(/.{1,64}/g).join('\n')}\n-----END PUBLIC KEY-----`
+    ? `-----BEGIN PUBLIC KEY-----\n${userPublicKeyBase64.replace(/\s/g, '').match(/.{1,64}/g)?.join('\n')}\n-----END PUBLIC KEY-----`
     : '';
+
+
 // Client secret : 
 const clientSecret = (process.env.CLIENT_SECRET || '').trim();
 const baseUrl = (process.env.DGFT_SANDBOX_URL || '').trim();
 
 // X-API key : 
 const apiKey = (process.env.X_API_KEY || '').trim();
+
+// Client ID : 
 const clientId = (process.env.CLIENT_ID || '').trim();
 
 // URL for generating access token : 
@@ -158,34 +163,72 @@ export const getSandboxToken = async () => {
     }
 };
 
+// fn() to check the system IP : 
+async function getPublicIPv4() {
+    try {
+        // Using ipify.org API (free, reliable, no rate limiting for basic usage)
+        const response = await fetch('https://api.ipify.org?format=json');
 
-// Step 3: generate 32 char plain text dynamic using keyboard chars .. 
-function generateDynamic32CharSecretKey() {
-    const keyboardChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let secretKey = '';
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
 
-    for (let i = 0; i < 32; i++) {
-        const randomIndex = Math.floor(Math.random() * keyboardChars.length);
-        secretKey = secretKey + keyboardChars[randomIndex];
+        const data = await response.json();
+        return data.ip;
+    } catch (error) {
+        console.error('Error fetching public IP:', error);
+        return null;
+    }
+}
+
+// Step 3: Generate 32-char secret key 
+async function generateDynamic32CharSecretKey() {
+    const appName = "shipzy";
+
+    const ip = await getPublicIPv4();
+    const timestamp = Date.now().toString();
+
+    let secretKey = `${appName}-${ip}${timestamp}`;
+    // Use all printable ASCII keyboard characters for padding
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:',.<>/?";
+    while (secretKey.length < 32) {
+        secretKey += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    if (secretKey.length > 32) {
+        secretKey = secretKey.substring(0, 32);
+    }
+
+    if (secretKey.length !== 32) {
+        throw new Error(`Secret key must be 32 characters long, got ${secretKey.length}`);
     }
     return secretKey;
 }
 
+async function generateSalt32ASCII() {
+    const appName = "shipzy";
+    const ip = await getPublicIPv4();
+    const timestamp = (Date.now() + 1000).toString();
 
-// 32 bytes ascii salt : 
-function generateSalt32ASCII() {
-    // Generate 32  ASCII chars 
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let salt = '';
-    for (let i = 0; i < 32; i++) {
+    let salt = `${appName}-${ip}${timestamp}`;
+    // Use all printable ASCII keyboard characters for padding
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:',.<>/?";
+    while (salt.length < 32) {
         salt += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    if (salt.length > 32) {
+        salt = salt.substring(0, 32);
+    }
+
+    if (salt.length !== 32) {
+        throw new Error(`Salt must be 32 characters long, got ${salt.length}`);
+    }
+
     return salt;
 }
 
 // Step 4: AES-GCM encryption helper fn()
 async function encryptPayloadAESGCM(payloadBase64, secretKey) {
-    const salt = generateSalt32ASCII();
+    const salt = await generateSalt32ASCII();
     const saltBuffer = Buffer.from(salt, 'ascii');
     const aes256Key = createAES256Key(secretKey, salt);
     const iv = crypto.randomBytes(12);
@@ -260,7 +303,6 @@ function encryptAESKey(secretKey) {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
-                mgf1Hash: "sha256",
             },
             secretKeyBuffer
         );
@@ -288,7 +330,7 @@ async function encryptPayload(payload) {
     console.log("Step 2: Base64 encoded, length:", payloadBase64.length);
 
     // Step 3: Generate 32-char secret key
-    const secretKey = generateDynamic32CharSecretKey();
+    const secretKey = await generateDynamic32CharSecretKey();
     console.log("Step 3: Secret key generated");
 
     // Step 4: AES-GCM encryption
@@ -434,54 +476,6 @@ function validatePayload(payload) {
 }
 
 
-// Generate encrypted values for curl command : 
-export const generateEbrcCurlParams = async (payload) => {
-    try {
-        console.log("=== STARTING EBRC CURL PARAMS GENERATION ===");
-
-
-        validatePayload(payload);
-        console.log("Payload validation passed");
-
-        // Step 2: Get access token
-        const { accessToken } = await getSandboxToken();
-        console.log("Access token obtained:", accessToken?.substring(0, 20), "... (length:", accessToken?.length, ")");
-
-        // Step 3: Encrypt payload
-        const encryptionResult = await encryptPayload(payload);
-
-        // Step 4: Encrypt AES key with DGFT's public key (for production API)
-        const encryptedAESKeyForAPI = encryptAESKey(encryptionResult.secretKey);
-
-
-        // Step 4: Generate messageID
-        const messageID = payload.requestId || `EBRC${Date.now()}`.substring(0, 50);
-
-        // Step 5: Display final results
-        console.log("=== FINAL API PARAMETERS ===");
-        console.log("Access Token (length):", accessToken?.length);
-        console.log("Secret Val (length):", encryptedAESKeyForAPI?.length);
-        console.log("Message ID:", messageID);
-        console.log("Data (length):", encryptionResult.encodedData?.length);
-        console.log("Signature (length):", encryptionResult.digitalSignature?.length);
-        console.log("Data (base64):", encryptionResult.encodedData?.substring(0, 60), "...");
-
-        return {
-            accessToken,
-            secretVal: encryptedAESKeyForAPI,
-            messageID,
-            data: encryptionResult.encodedData,
-            sign: encryptionResult.digitalSignature,
-
-        };
-
-    } catch (error) {
-        console.error("Error generating cURL params:", error.message);
-        throw error;
-    }
-};
-
-
 // File eBRC data
 export const fileEbrcService = async (payload) => {
     try {
@@ -555,14 +549,17 @@ export const fileEbrcService = async (payload) => {
 function decryptForValidation(encryptedDataBase64, secretKey) {
     const buf = Buffer.from(encryptedDataBase64, 'base64');
     const iv = buf.subarray(0, 12);
-    const salt = buf.subarray(12, 44);
+    const salt = buf.subarray(12, 44); // 32 bytes salt
     const ciphertextWithTag = buf.subarray(44);
+
+    // GCM auth tag is typically 16 bytes (128 bits)
     const tag = ciphertextWithTag.subarray(-16);
     const ciphertext = ciphertextWithTag.subarray(0, -16);
 
     const aesKey = createAES256Key(secretKey, salt);
     const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
     decipher.setAuthTag(tag);
+
     const decrypted = decipher.update(ciphertext);
     const final = decipher.final();
     return Buffer.concat([decrypted, final]).toString('utf8');
