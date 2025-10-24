@@ -303,14 +303,12 @@ function encryptAESKey(secretKey) {
             key: dgftPublicKey,
             padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
             oaepHash: "sha256",
-            oaepMgf1Hash: "sha256",
-            oaepLabel: Buffer.alloc(0),
         },
         secretKeyBuffer
     );
 
     const encryptedKeyBase64 = encryptedKey.toString('base64');
-    
+
     console.log("Encrypted secretVal length:", encryptedKeyBase64.length);
     console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
     return encryptedKeyBase64;
