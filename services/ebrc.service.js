@@ -5,7 +5,6 @@ import crypto from "crypto";
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import forge from 'node-forge';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -43,7 +42,7 @@ const clientId = (process.env.CLIENT_ID || '').trim();
 const accessTokenBaseUrl = (process.env.ACCESS_TOKEN_URL || '').trim();
 
 
-// Currency codes from DGFT specification
+
 const VALID_CURRENCY_CODES = [
     'USD', 'DEM', 'SGD', 'CHF', 'GBP', 'JPY', 'HKD', 'EUR', 'ITL', 'FRF',
     'AUD', 'SEK', 'CAD', 'BEF', 'DKK', 'FIM', 'NOK', 'ATS', 'INR', 'NLG',
@@ -62,9 +61,8 @@ const VALID_CURRENCY_CODES = [
     'RUR', 'TRY', 'KGS'
 ];
 
-// Purpose codes from DGFT specification (Annexures 6.1 & 6.2)
+
 const VALID_PURPOSE_CODES = [
-    // Inward Remittance (Annexure 6.1)
     'P0101', 'P0102', 'P0103', 'P0104', 'P0108', 'P0109',
     'P0201', 'P0202', 'P0205', 'P0207', 'P0208', 'P0211', 'P0214', 'P0215',
     'P0216', 'P0217', 'P0218', 'P0219', 'P0220', 'P0221', 'P0222', 'P0223',
@@ -85,31 +83,8 @@ const VALID_PURPOSE_CODES = [
     'P1505',
     'P1601', 'P1602',
     'P1701',
-    // Outward Remittance (Annexure 6.2)
     'S1501', 'S1502', 'S1504'
 ];
-
-// utility: Check current public IP
-export const checkCurrentIP = async () => {
-    try {
-        const response = await fetch('https://api.ipify.org?format=json', {
-            signal: AbortSignal.timeout(5000)
-        });
-
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log("=== CURRENT SYSTEM IP ===");
-        console.log("Public IP:", data.ip);
-        return data;
-    } catch (error) {
-        console.error("IP check failed:", error.message);
-        return { ip: 'unknown' };
-    }
-};
-
 
 // Generating access token : ----->
 export const getSandboxToken = async () => {
@@ -167,7 +142,6 @@ export const getSandboxToken = async () => {
 // fn() to check the system IP : 
 async function getPublicIPv4() {
     try {
-        // Using ipify.org API (free, reliable, no rate limiting for basic usage)
         const response = await fetch('https://api.ipify.org?format=json');
 
         if (!response.ok) {
@@ -188,7 +162,7 @@ async function generateDynamic32CharSecretKey() {
     const ip = await getPublicIPv4();
     const timestamp = Date.now().toString().slice(-10);
 
-    //  dots in IP with hyphens 
+    // Remove dots in IP with hyphens 
     const ipClean = ip ? ip.replace(/\./g, '-') : 'localhost';
     let base = `${appName}-${ipClean}-${timestamp}`;
 
@@ -208,7 +182,7 @@ async function generateDynamic32CharSecretKey() {
         throw new Error(`Secret key must be exactly 32 characters, got ${base.length}`);
     }
 
-    //  no special characters 
+    // no special characters 
     if (!/^[A-Za-z0-9-]+$/.test(base)) {
         throw new Error(`Secret key contains invalid characters: ${base}`);
     }
@@ -225,7 +199,6 @@ async function generateSalt32ASCII() {
     const ip = await getPublicIPv4();
     const timestamp = (Date.now() + 1000).toString().slice(-10);
 
-   
     const ipClean = ip ? ip.replace(/\./g, '-') : 'localhost';
     let salt = `${appName}-${ipClean}-${timestamp}`;
 
@@ -239,7 +212,7 @@ async function generateSalt32ASCII() {
     // Truncate if over 32
     salt = salt.substring(0, 32);
 
-    //  32 ASCII alphanumeric + hyphen 
+    // 32 ASCII alphanumeric + hyphen 
     if (salt.length !== 32 || !/^[A-Za-z0-9-]+$/.test(salt)) {
         throw new Error(`Invalid salt generated: ${salt}`);
     }
@@ -296,7 +269,7 @@ function createDigitalSignature(payloadBase64) {
 }
 
 
-// RSA encryption with OAEP parameters
+// RSA encryption using native crypto (RSA-OAEP with SHA-256)
 function encryptAESKey(secretKey) {
     console.log("=== ENCRYPTING SECRET KEY ===");
     console.log("Secret key (plain):", secretKey);
@@ -319,46 +292,25 @@ function encryptAESKey(secretKey) {
     }
 
     console.log("Secret key hex:", Buffer.from(secretKey, 'utf8').toString('hex'));
-    console.log("DGFT Public Key (first 100 chars):", dgftPublicKey.substring(0, 100));
 
     try {
-        // Parse DGFT public key
-        const forgePublicKey = forge.pki.publicKeyFromPem(dgftPublicKey);
+        // Convert secret key to Buffer
+        const secretBuffer = Buffer.from(secretKey, 'utf8');
 
-        // Log key info for debugging
-        console.log("Public key modulus bits:", forgePublicKey.n.bitLength());
-        console.log("Public key exponent:", forgePublicKey.e.toString());
-
-        // CRITICAL: Convert secret to binary string format for forge
-        // forge expects binary string, NOT UTF-8 string
-        const secretBinary = forge.util.encodeUtf8(secretKey);
-
-        console.log("Secret binary length:", secretBinary.length);
-        console.log("Secret binary (hex):", forge.util.bytesToHex(secretBinary).substring(0, 64));
-
-        // Encrypt using RSA-OAEP with SHA-256 and MGF1-SHA-256
-        const encrypted = forgePublicKey.encrypt(
-            secretBinary,  // Binary string format
-            'RSA-OAEP',
+        // Encrypt using RSA-OAEP with SHA-256
+        const encrypted = crypto.publicEncrypt(
             {
-                md: forge.md.sha256.create(),
-                mgf1: {
-                    md: forge.md.sha256.create()
-                }
-            }
+                key: dgftPublicKey,
+                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+                oaepHash: 'sha256',
+            },
+            secretBuffer
         );
 
         console.log("Encrypted bytes length:", encrypted.length);
-        console.log("Expected encrypted length:", forgePublicKey.n.bitLength() / 8);
-
-        // Verify encryption output length matches key size
-        const expectedLength = Math.ceil(forgePublicKey.n.bitLength() / 8);
-        if (encrypted.length !== expectedLength) {
-            throw new Error(`Encrypted output length mismatch: got ${encrypted.length}, expected ${expectedLength}`);
-        }
 
         // Base64 encode the result
-        const encryptedKeyBase64 = forge.util.encode64(encrypted);
+        const encryptedKeyBase64 = encrypted.toString('base64');
 
         console.log("Encrypted secretVal (raw bytes):", encrypted.length);
         console.log("Encrypted secretVal (base64 length):", encryptedKeyBase64.length);
@@ -378,7 +330,7 @@ function encryptAESKey(secretKey) {
     }
 }
 
-//  encryption process 
+// Encryption process 
 async function encryptPayload(payload) {
 
     // Step 1: json data -----> 
@@ -515,9 +467,6 @@ function validatePayload(payload) {
             if (dto.irmFCC && !VALID_CURRENCY_CODES.includes(dto.irmFCC.toUpperCase())) {
                 errors.push(`Invalid currency code ${dto.irmFCC} in record ${recordNum}`);
             }
-
-            // Other validations remain the same...
-            // ...existing validation code...
         });
     }
 
@@ -552,7 +501,7 @@ export const fileEbrcService = async (payload) => {
         // Step 5: Generate messageID
         const messageID = payload.requestId || `EBRC-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-        // Step 6:  headers 
+        // Step 6: Prepare headers 
         const headers = {
             "Content-Type": "application/json",
             "accessToken": accessToken,
@@ -562,7 +511,7 @@ export const fileEbrcService = async (payload) => {
             "messageID": messageID
         };
 
-        //  API call
+        // API call
         const response = await axios.post(
             `${baseUrl}/pushIRMToGenEBRC`,
             {
@@ -574,7 +523,7 @@ export const fileEbrcService = async (payload) => {
                 timeout: 30000
             }
         );
-        console.log("eBRC FILING SUCCESS");
+        console.log("eBRC data hass been pushed successfully ");
         console.log("Response:", response.data);
 
         return {
@@ -598,18 +547,3 @@ export const fileEbrcService = async (payload) => {
 };
 
 
-function verifyDGFTPublicKey() {
-    try {
-        const forgePublicKey = forge.pki.publicKeyFromPem(dgftPublicKey);
-        console.log("=== DGFT PUBLIC KEY VERIFICATION ===");
-        console.log("Key type: RSA");
-        console.log("Modulus bits:", forgePublicKey.n.bitLength());
-        console.log("Exponent:", forgePublicKey.e.toString());
-        console.log("Public key is valid: ✓");
-        return true;
-    } catch (error) {
-        console.error("Invalid DGFT public key:", error);
-        return false;
-    }
-}
-verifyDGFTPublicKey();
