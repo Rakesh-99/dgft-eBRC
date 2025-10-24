@@ -188,22 +188,29 @@ async function generateDynamic32CharSecretKey() {
     const ip = await getPublicIPv4();
     const timestamp = Date.now().toString().slice(-10);
 
-    let base = `${appName}-${ip}-${timestamp}`;
+    //  dots in IP with hyphens 
+    const ipClean = ip ? ip.replace(/\./g, '-') : 'localhost';
+    let base = `${appName}-${ipClean}-${timestamp}`;
 
-    
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-";
+    // Use ONLY alphanumeric and hyphen characters
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
     // Pad 32 characters
     while (base.length < 32) {
         base += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    // Truncate if over 32
+    // Truncate to exactly 32
     base = base.substring(0, 32);
 
-    //  32 ASCII characters
+    // 32 ASCII printable characters
     if (base.length !== 32) {
         throw new Error(`Secret key must be exactly 32 characters, got ${base.length}`);
+    }
+
+    //  no special characters 
+    if (!/^[A-Za-z0-9-]+$/.test(base)) {
+        throw new Error(`Secret key contains invalid characters: ${base}`);
     }
 
     console.log("Generated 32-char secret:", base);
@@ -218,21 +225,26 @@ async function generateSalt32ASCII() {
     const ip = await getPublicIPv4();
     const timestamp = (Date.now() + 1000).toString().slice(-10);
 
-    let salt = `${appName}-${ip}-${timestamp}`;
+   
+    const ipClean = ip ? ip.replace(/\./g, '-') : 'localhost';
+    let salt = `${appName}-${ipClean}-${timestamp}`;
+
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
-    if (salt.length < 32) {
-        while (salt.length < 32) {
-            salt += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-    } else if (salt.length > 32) {
-        salt = salt.substring(0, 32);
+    // Pad to 32 characters
+    while (salt.length < 32) {
+        salt += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    if (salt.length !== 32 || !/^[\x20-\x7E]{32}$/.test(salt)) {
+    // Truncate if over 32
+    salt = salt.substring(0, 32);
+
+    //  32 ASCII alphanumeric + hyphen 
+    if (salt.length !== 32 || !/^[A-Za-z0-9-]+$/.test(salt)) {
         throw new Error(`Invalid salt generated: ${salt}`);
     }
 
+    console.log("Generated salt:", salt);
     return salt;
 }
 
@@ -291,25 +303,42 @@ function encryptAESKey(secretKey) {
     console.log("Char length:", secretKey.length);
     console.log("Byte length:", Buffer.byteLength(secretKey, 'utf8'));
 
-    // Validation
+    // Strict validation
     if (secretKey.length !== 32) {
-        throw new Error(`Secret key must be 32 characters, got ${secretKey.length}`);
-    }
-    if (Buffer.byteLength(secretKey, 'utf8') !== 32) {
-        throw new Error(`Secret key must be 32 bytes in UTF-8, got ${Buffer.byteLength(secretKey, 'utf8')}`);
+        throw new Error(`Secret key must be exactly 32 characters, got ${secretKey.length}`);
     }
 
-    //  plain secret to buffer (UTF-8)
-    const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
-    console.log("Secret key hex:", secretKeyBuffer.toString('hex'));
+    const byteLength = Buffer.byteLength(secretKey, 'utf8');
+    if (byteLength !== 32) {
+        throw new Error(`Secret key must be exactly 32 bytes in UTF-8, got ${byteLength}`);
+    }
+
+    // Validate character set
+    if (!/^[A-Za-z0-9-]+$/.test(secretKey)) {
+        throw new Error(`Secret key contains invalid characters`);
+    }
+
+    console.log("Secret key hex:", Buffer.from(secretKey, 'utf8').toString('hex'));
+    console.log("DGFT Public Key (first 100 chars):", dgftPublicKey.substring(0, 100));
 
     try {
-        //  node-forge for OAEP SHA-256 with MGF1 SHA-256
+        // Parse DGFT public key
         const forgePublicKey = forge.pki.publicKeyFromPem(dgftPublicKey);
 
-        // Encrypt the PLAIN secret key using RSA-OAEP
+        // Log key info for debugging
+        console.log("Public key modulus bits:", forgePublicKey.n.bitLength());
+        console.log("Public key exponent:", forgePublicKey.e.toString());
+
+        // CRITICAL: Convert secret to binary string format for forge
+        // forge expects binary string, NOT UTF-8 string
+        const secretBinary = forge.util.encodeUtf8(secretKey);
+
+        console.log("Secret binary length:", secretBinary.length);
+        console.log("Secret binary (hex):", forge.util.bytesToHex(secretBinary).substring(0, 64));
+
+        // Encrypt using RSA-OAEP with SHA-256 and MGF1-SHA-256
         const encrypted = forgePublicKey.encrypt(
-            secretKey,  // Pass as plain string, not binary
+            secretBinary,  // Binary string format
             'RSA-OAEP',
             {
                 md: forge.md.sha256.create(),
@@ -319,16 +348,32 @@ function encryptAESKey(secretKey) {
             }
         );
 
-        // Base64 encode the encrypted result
+        console.log("Encrypted bytes length:", encrypted.length);
+        console.log("Expected encrypted length:", forgePublicKey.n.bitLength() / 8);
+
+        // Verify encryption output length matches key size
+        const expectedLength = Math.ceil(forgePublicKey.n.bitLength() / 8);
+        if (encrypted.length !== expectedLength) {
+            throw new Error(`Encrypted output length mismatch: got ${encrypted.length}, expected ${expectedLength}`);
+        }
+
+        // Base64 encode the result
         const encryptedKeyBase64 = forge.util.encode64(encrypted);
 
         console.log("Encrypted secretVal (raw bytes):", encrypted.length);
         console.log("Encrypted secretVal (base64 length):", encryptedKeyBase64.length);
-        console.log("Encrypted secretVal:", encryptedKeyBase64);
+        console.log("Encrypted secretVal (base64):", encryptedKeyBase64);
+        console.log("Encrypted secretVal (first 50 chars):", encryptedKeyBase64.substring(0, 50));
+
+        // Additional validation
+        if (!encryptedKeyBase64 || encryptedKeyBase64.length === 0) {
+            throw new Error("Encryption produced empty result");
+        }
 
         return encryptedKeyBase64;
     } catch (error) {
         console.error("RSA encryption failed:", error);
+        console.error("Error stack:", error.stack);
         throw new Error(`Failed to encrypt secret key: ${error.message}`);
     }
 }
@@ -553,3 +598,18 @@ export const fileEbrcService = async (payload) => {
 };
 
 
+function verifyDGFTPublicKey() {
+    try {
+        const forgePublicKey = forge.pki.publicKeyFromPem(dgftPublicKey);
+        console.log("=== DGFT PUBLIC KEY VERIFICATION ===");
+        console.log("Key type: RSA");
+        console.log("Modulus bits:", forgePublicKey.n.bitLength());
+        console.log("Exponent:", forgePublicKey.e.toString());
+        console.log("Public key is valid: ✓");
+        return true;
+    } catch (error) {
+        console.error("Invalid DGFT public key:", error);
+        return false;
+    }
+}
+verifyDGFTPublicKey();
