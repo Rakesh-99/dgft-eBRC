@@ -310,6 +310,7 @@ function encryptAESKey(secretKey) {
     );
 
     const encryptedKeyBase64 = encryptedKey.toString('base64');
+    
     console.log("Encrypted secretVal length:", encryptedKeyBase64.length);
     console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
     return encryptedKeyBase64;
@@ -334,15 +335,8 @@ async function encryptPayload(payload) {
     const encryptionResult = await encryptPayloadAESGCM(payloadBase64, secretKey);
     console.log("Step 4: AES-GCM encrypted");
 
-    // fn() or local decryption : decryptForValidation()
-    const localDecrypt = decryptForValidation(encryptionResult.finalBuffer, secretKey);
-    if (localDecrypt !== payloadBase64) {
-        throw new Error("Decryption failed !");
-    }
-    console.log("local decryption validation passed------------>");
-
     // Step 5: Sign the Base64 JSON (Step 2 output)
-    const digitalSignature = createDigitalSignature(encryptionResult.finalBuffer);
+    const digitalSignature = createDigitalSignature(payloadBase64);
     console.log("Step 5: Digital signature created", "The signature is -------------------------------> ", digitalSignature);
     console.log("Step 5: Digital signature length is,  -------------------------------> ", digitalSignature.length);
     return {
