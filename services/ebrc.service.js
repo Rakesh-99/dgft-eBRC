@@ -496,6 +496,10 @@ export const fileEbrcService = async (payload) => {
         // Step 4: Encrypt secret key for DGFT 
         const encryptedSecretVal = encryptAESKey(encryptionResult.secretKey);
 
+        // local -> Encrypt secret key with user public key
+        const encryptedSecretValWithUserKey = encryptAESKeyWithUserPublicKey(encryptionResult.secretKey);
+        console.log("Encrypted secret val with user key -------------------------> ", encryptedSecretValWithUserKey);
+
         console.log(" Secret key encrypted for DGFT");
 
         // Step 5: Generate messageID
@@ -545,5 +549,7 @@ export const fileEbrcService = async (payload) => {
         throw error;
     }
 };
+
+
 
 
