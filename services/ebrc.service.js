@@ -301,10 +301,9 @@ function encryptAESKey(secretKey) {
 
     try {
         // Convert PEM to forge public key
-        const publicKeyPem = dgftPublicKey;
-        const forgePublicKey = forge.pki.publicKeyFromPem(publicKeyPem);
+        const forgePublicKey = forge.pki.publicKeyFromPem(dgftPublicKey);
 
-        // Encrypt using OAEP with SHA-256 for both hash and MGF1
+        // Encrypt using OAEP with SHA-256, MGF1-SHA256, and EMPTY label
         const encrypted = forgePublicKey.encrypt(
             secretKeyBuffer.toString('binary'),
             'RSA-OAEP',
@@ -312,21 +311,17 @@ function encryptAESKey(secretKey) {
                 md: forge.md.sha256.create(),
                 mgf1: {
                     md: forge.md.sha256.create()
-                }
+                },
+                //  empty label 
+                label: ''
             }
         );
 
-        // Convert to base64
         const encryptedKeyBase64 = forge.util.encode64(encrypted);
 
         console.log("Encrypted secretVal (raw bytes):", encrypted.length);
         console.log("Encrypted secretVal (base64 length):", encryptedKeyBase64.length);
         console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
-
-        // Verify it's proper base64
-        if (!/^[A-Za-z0-9+/]+=*$/.test(encryptedKeyBase64)) {
-            throw new Error("Generated base64 is invalid");
-        }
 
         return encryptedKeyBase64;
     } catch (error) {
@@ -557,24 +552,4 @@ export const fileEbrcService = async (payload) => {
     }
 };
 
-// for local testing : 
 
-// Helper: Decrypt encrypted data using secret key to validate :
-function decryptForValidation(encryptedDataBase64, secretKey) {
-    const buf = Buffer.from(encryptedDataBase64, 'base64');
-    const iv = buf.subarray(0, 12);
-    const salt = buf.subarray(12, 44); // 32 bytes salt
-    const ciphertextWithTag = buf.subarray(44);
-
-    // GCM auth tag is typically 16 bytes (128 bits)
-    const tag = ciphertextWithTag.subarray(-16);
-    const ciphertext = ciphertextWithTag.subarray(0, -16);
-
-    const aesKey = createAES256Key(secretKey, salt);
-    const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
-    decipher.setAuthTag(tag);
-
-    const decrypted = decipher.update(ciphertext);
-    const final = decipher.final();
-    return Buffer.concat([decrypted, final]).toString('utf8');
-}
