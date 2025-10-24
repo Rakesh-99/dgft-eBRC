@@ -307,6 +307,7 @@ function encryptAESKey(secretKey) {
                 key: dgftPublicKey,
                 padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
                 oaepHash: "sha256",
+                oaepMgf1Hash: "sha256",
             },
             secretKeyBuffer
         );
@@ -349,9 +350,9 @@ async function encryptPayload(payload) {
     console.log("local decryption validation passed------------>");
 
     // Step 5: Sign the Base64 JSON (Step 2 output)
-    const digitalSignature = createDigitalSignature(payloadBase64);
-    console.log("Step 5: Digital signature created");
-
+    const digitalSignature = createDigitalSignature(encryptionResult.finalBuffer);
+    console.log("Step 5: Digital signature created", "The signature is -------------------------------> ", digitalSignature);
+    console.log("Step 5: Digital signature length is,  -------------------------------> ", digitalSignature.length);
     return {
         secretKey,
         encodedData: encryptionResult.finalBuffer,
@@ -497,6 +498,7 @@ export const fileEbrcService = async (payload) => {
 
         // Step 4: Encrypt secret key for DGFT 
         const encryptedSecretVal = encryptAESKey(encryptionResult.secretKey);
+
         console.log(" Secret key encrypted for DGFT");
 
         // Step 5: Generate messageID
