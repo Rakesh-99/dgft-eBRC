@@ -5,6 +5,7 @@ import crypto from "crypto";
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import forge from 'node-forge';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -298,20 +299,43 @@ function encryptAESKey(secretKey) {
     const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
     console.log("Secret key hex:", secretKeyBuffer.toString('hex'));
 
-    const encryptedKey = crypto.publicEncrypt(
-        {
-            key: dgftPublicKey,
-            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-            oaepHash: "sha256",
-        },
-        secretKeyBuffer
-    );
+    try {
+        // Convert PEM to forge public key
+        const publicKeyPem = dgftPublicKey;
+        const forgePublicKey = forge.pki.publicKeyFromPem(publicKeyPem);
 
-    const encryptedKeyBase64 = encryptedKey.toString('base64');
+        // Encrypt using OAEP with SHA-256 for both hash and MGF1
+        const encrypted = forgePublicKey.encrypt(
+            secretKeyBuffer.toString('binary'),
+            'RSA-OAEP',
+            {
+                md: forge.md.sha256.create(),
+                mgf1: {
+                    md: forge.md.sha256.create()
+                }
+            }
+        );
 
-    console.log("Encrypted secretVal length:", encryptedKeyBase64.length);
-    console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
-    return encryptedKeyBase64;
+        // Convert to base64
+        const encryptedKeyBase64 = forge.util.encode64(encrypted);
+
+        console.log("Encrypted secretVal (raw bytes):", encrypted.length);
+        console.log("Encrypted secretVal (base64 length):", encryptedKeyBase64.length);
+        console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
+
+        // Verify it's proper base64
+        if (!/^[A-Za-z0-9+/]+=*$/.test(encryptedKeyBase64)) {
+            throw new Error("Generated base64 is invalid");
+        }
+
+        return encryptedKeyBase64;
+    } catch (error) {
+        console.error("RSA encryption error details:", {
+            message: error.message,
+            stack: error.stack
+        });
+        throw new Error(`Failed to encrypt secret key: ${error.message}`);
+    }
 }
 
 //  encryption process 
