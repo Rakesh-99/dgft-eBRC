@@ -190,24 +190,29 @@ async function generateDynamic32CharSecretKey() {
 
     let base = `${appName}-${ip}-${timestamp}`;
 
-    // Pad or truncate to exactly 32
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-";
 
-    if (base.length < 32) {
-        while (base.length < 32) {
-            base += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-    } else if (base.length > 32) {
-        base = base.substring(0, 32);
+    // Pad 32 characters
+    while (base.length < 32) {
+        base += chars.charAt(Math.floor(Math.random() * chars.length));
     }
 
-    // Final safety check
-    if (base.length !== 32 || !/^[\x20-\x7E]{32}$/.test(base)) {
-        throw new Error("Failed to generate valid 32-char key");
+    // Truncate if over 32
+    base = base.substring(0, 32);
+
+    //  32 ASCII characters
+    if (base.length !== 32) {
+        throw new Error(`Secret key must be exactly 32 characters, got ${base.length}`);
     }
+
+    console.log("Generated 32-char secret:", base);
+    console.log("Secret key length:", base.length);
+    console.log("Secret key bytes:", Buffer.from(base, 'utf8').length);
 
     return base;
 }
+
 async function generateSalt32ASCII() {
     const appName = "shipzy";
     const ip = await getPublicIPv4();
@@ -282,53 +287,48 @@ function createDigitalSignature(payloadBase64) {
 // RSA encryption with OAEP parameters
 function encryptAESKey(secretKey) {
     console.log("=== ENCRYPTING SECRET KEY ===");
-    console.log("Secret key:", secretKey);
+    console.log("Secret key (plain):", secretKey);
     console.log("Char length:", secretKey.length);
     console.log("Byte length:", Buffer.byteLength(secretKey, 'utf8'));
 
+    // Validation
     if (secretKey.length !== 32) {
         throw new Error(`Secret key must be 32 characters, got ${secretKey.length}`);
     }
     if (Buffer.byteLength(secretKey, 'utf8') !== 32) {
-        throw new Error(`Secret key must be 32 bytes in UTF-8`);
-    }
-    if (!/^[\x20-\x7E]{32}$/.test(secretKey)) {
-        throw new Error("Secret key must be 32 printable ASCII characters");
+        throw new Error(`Secret key must be 32 bytes in UTF-8, got ${Buffer.byteLength(secretKey, 'utf8')}`);
     }
 
+    //  plain secret to buffer (UTF-8)
     const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
     console.log("Secret key hex:", secretKeyBuffer.toString('hex'));
 
     try {
-        // Convert PEM to forge public key
+        //  node-forge for OAEP SHA-256 with MGF1 SHA-256
         const forgePublicKey = forge.pki.publicKeyFromPem(dgftPublicKey);
 
-        // Encrypt using OAEP with SHA-256, MGF1-SHA256, and EMPTY label
+        // Encrypt the PLAIN secret key using RSA-OAEP
         const encrypted = forgePublicKey.encrypt(
-            secretKeyBuffer.toString('binary'),
+            secretKey,  // Pass as plain string, not binary
             'RSA-OAEP',
             {
                 md: forge.md.sha256.create(),
                 mgf1: {
                     md: forge.md.sha256.create()
-                },
-                //  empty label 
-                label: ''
+                }
             }
         );
 
+        // Base64 encode the encrypted result
         const encryptedKeyBase64 = forge.util.encode64(encrypted);
 
         console.log("Encrypted secretVal (raw bytes):", encrypted.length);
         console.log("Encrypted secretVal (base64 length):", encryptedKeyBase64.length);
-        console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
+        console.log("Encrypted secretVal:", encryptedKeyBase64);
 
         return encryptedKeyBase64;
     } catch (error) {
-        console.error("RSA encryption error details:", {
-            message: error.message,
-            stack: error.stack
-        });
+        console.error("RSA encryption failed:", error);
         throw new Error(`Failed to encrypt secret key: ${error.message}`);
     }
 }
