@@ -296,6 +296,7 @@ function encryptAESKey(secretKey) {
     }
 
     const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
+    console.log("Secret key hex:", secretKeyBuffer.toString('hex'));
 
     const encryptedKey = crypto.publicEncrypt(
         {
