@@ -280,47 +280,38 @@ function createDigitalSignature(payloadBase64) {
 
 // RSA encryption with OAEP parameters
 function encryptAESKey(secretKey) {
-    try {
-        if (!dgftPublicKey) {
-            throw new Error("DGFT_PUBLIC_KEY not found");
-        }
+    console.log("=== ENCRYPTING SECRET KEY ===");
+    console.log("Secret key:", secretKey);
+    console.log("Char length:", secretKey.length);
+    console.log("Byte length:", Buffer.byteLength(secretKey, 'utf8'));
 
-        const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
-
-        if (secretKey.length !== 32) {
-            throw new Error(`Secret key MUST be 32 characters, got ${secretKey.length}`);
-        }
-
-        if (secretKeyBuffer.length !== 32) {
-            throw new Error(`Secret key MUST be 32 bytes, got ${secretKeyBuffer.length} bytes`);
-        }
-
-        if (!/^[\x20-\x7E]{32}$/.test(secretKey)) {
-            throw new Error("Secret key must be 32 printable ASCII characters");
-        }
-
-        console.log("=== RSA ENCRYPTION ===");
-
-        // RSA-OAEP with SHA-256
-        const encryptedKey = crypto.publicEncrypt(
-            {
-                key: dgftPublicKey,
-                padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-                oaepHash: "sha256",
-                oaepMgf1Hash: "sha256",
-            },
-            secretKeyBuffer
-        );
-
-        const encryptedKeyBase64 = encryptedKey.toString('base64');
-
-        return encryptedKeyBase64;
-
-    } catch (error) {
-        console.error("=== RSA ENCRYPTION FAILED ===");
-        console.error("Error:", error.message);
-        throw error;
+    if (secretKey.length !== 32) {
+        throw new Error(`Secret key must be 32 characters, got ${secretKey.length}`);
     }
+    if (Buffer.byteLength(secretKey, 'utf8') !== 32) {
+        throw new Error(`Secret key must be 32 bytes in UTF-8`);
+    }
+    if (!/^[\x20-\x7E]{32}$/.test(secretKey)) {
+        throw new Error("Secret key must be 32 printable ASCII characters");
+    }
+
+    const secretKeyBuffer = Buffer.from(secretKey, 'utf8');
+
+    const encryptedKey = crypto.publicEncrypt(
+        {
+            key: dgftPublicKey,
+            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+            oaepHash: "sha256",
+            oaepMgf1Hash: "sha256",
+            oaepLabel: Buffer.alloc(0),
+        },
+        secretKeyBuffer
+    );
+
+    const encryptedKeyBase64 = encryptedKey.toString('base64');
+    console.log("Encrypted secretVal length:", encryptedKeyBase64.length);
+    console.log("Encrypted secretVal sample:", encryptedKeyBase64.substring(0, 60) + "...");
+    return encryptedKeyBase64;
 }
 
 //  encryption process 
